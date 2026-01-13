@@ -506,6 +506,18 @@ static void lvgl_port_task(void *arg)
 esp_err_t lvgl_port_init(esp_lcd_panel_handle_t lcd_handle, esp_lcd_touch_handle_t tp_handle)
 {
     lv_init(); // Initialize LVGL
+    
+    // Initialize dark theme for all displays
+    // Using NULL will apply to the default display created later
+    lv_theme_t * theme = lv_theme_default_init(
+        NULL,                                    // Display (NULL = default)
+        lv_palette_main(LV_PALETTE_BLUE),       // Primary color
+        lv_palette_main(LV_PALETTE_DEEP_ORANGE),// Secondary color
+        true,                                    // Dark mode = true
+        LV_FONT_DEFAULT                         // Font
+    );
+    lv_disp_set_theme(lv_disp_get_default(), theme); // Apply theme to default display
+    
     ESP_ERROR_CHECK(tick_init()); // Initialize the tick timer
 
     lv_disp_t *disp = display_init(lcd_handle); // Initialize the display
