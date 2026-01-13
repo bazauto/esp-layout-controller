@@ -1,7 +1,7 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "idf.espIdfPath": "/home/pbarrett/esp/v5.5.2/esp-idf",
-  "idf.pythonInstallPath": "/usr/bin/python3",
+  "idf.pythonInstallPath": "E:\\Development\\esp-idf\\tools\\tools\\idf-python\\3.11.2\\python.exe",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
@@ -16,5 +16,6 @@
     "--query-driver=**",
     "--compile-commands-dir=/home/pbarrett/Development/esp-screen-test/build"
   ],
-  "idf.flashType": "JTAG"
+  "idf.flashType": "UART",
+  "idf.portWin": "COM4"
 }
