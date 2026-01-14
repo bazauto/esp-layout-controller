@@ -16,7 +16,6 @@ static const char* TAG = "JmriConfigScreen";
 // NVS keys for JMRI settings
 static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SERVER_IP = "server_ip";
-static const char* NVS_KEY_JSON_PORT = "json_port";
 static const char* NVS_KEY_WITHROTTLE_PORT = "wt_port";
 static const char* NVS_KEY_POWER_MANAGER = "power_mgr";
 
@@ -25,7 +24,6 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient, WiThrottleClient&
     , m_jsonStatusLabel(nullptr)
     , m_wiThrottleStatusLabel(nullptr)
     , m_serverIpInput(nullptr)
-    , m_jsonPortInput(nullptr)
     , m_wiThrottlePortInput(nullptr)
     , m_powerManagerInput(nullptr)
     , m_connectButton(nullptr)
@@ -135,22 +133,6 @@ void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
     lv_obj_add_event_cb(m_serverIpInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
     lv_obj_add_event_cb(m_serverIpInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
     
-    // JSON Port label
-    lv_obj_t* jsonPortLabel = lv_label_create(leftColumn);
-    lv_label_set_text(jsonPortLabel, "JSON API Port:");
-    lv_obj_set_width(jsonPortLabel, LV_PCT(100));
-    
-    // JSON Port input
-    m_jsonPortInput = lv_textarea_create(leftColumn);
-    lv_textarea_set_one_line(m_jsonPortInput, true);
-    lv_textarea_set_placeholder_text(m_jsonPortInput, "12080");
-    lv_textarea_set_text(m_jsonPortInput, "12080");
-    lv_obj_set_width(m_jsonPortInput, LV_PCT(100));
-    lv_textarea_set_accepted_chars(m_jsonPortInput, "0123456789");
-    lv_textarea_set_max_length(m_jsonPortInput, 5);
-    lv_obj_add_event_cb(m_jsonPortInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
-    lv_obj_add_event_cb(m_jsonPortInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
-    
     // WiThrottle Port label
     lv_obj_t* wtPortLabel = lv_label_create(leftColumn);
     lv_label_set_text(wtPortLabel, "WiThrottle Port:");
@@ -189,9 +171,18 @@ void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
     lv_obj_add_event_cb(m_powerManagerInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
     lv_obj_add_event_cb(m_powerManagerInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
     
-    // Info label
+    // Info box
+    // lv_obj_t* infoBox = lv_obj_create(rightColumn);
+    // lv_obj_set_size(infoBox, LV_PCT(100), LV_SIZE_CONTENT);
+    // lv_obj_set_style_bg_color(infoBox, lv_color_hex(0x2A2A2A), 0);
+    // lv_obj_set_style_border_color(infoBox, lv_color_hex(0x00AAFF), 0);
+    // lv_obj_set_style_border_width(infoBox, 1, 0);
+    // lv_obj_set_style_pad_all(infoBox, 8, 0);
+    // lv_obj_set_style_radius(infoBox, 5, 0);
+    
     lv_obj_t* infoLabel = lv_label_create(rightColumn);
     lv_label_set_text(infoLabel, 
+        "JSON API port is auto-discovered by WiThrottle.\n\n"
         "Common names:\n"
         "• DCC++\n"
         "• main\n"
@@ -272,10 +263,10 @@ void JmriConfigScreen::showKeyboard(lv_obj_t* textarea)
         // Update label
         if (textarea == m_serverIpInput) {
             lv_label_set_text(m_keyboardLabel, "Editing: Server IP Address");
-        } else if (textarea == m_jsonPortInput) {
-            lv_label_set_text(m_keyboardLabel, "Editing: JSON API Port");
         } else if (textarea == m_wiThrottlePortInput) {
             lv_label_set_text(m_keyboardLabel, "Editing: WiThrottle Port");
+        } else if (textarea == m_powerManagerInput) {
+            lv_label_set_text(m_keyboardLabel, "Editing: Power Manager Name");
         }
         
         lv_obj_clear_flag(m_keyboard, LV_OBJ_FLAG_HIDDEN);
@@ -348,7 +339,6 @@ void JmriConfigScreen::updateStatus()
 void JmriConfigScreen::connectToJmri()
 {
     std::string serverIp = getServerIpText();
-    std::string jsonPortStr = getJsonPortText();
     std::string wtPortStr = getWiThrottlePortText();
     std::string powerMgr = getPowerManagerText();
     
@@ -357,8 +347,7 @@ void JmriConfigScreen::connectToJmri()
         return;
     }
     
-    // Parse ports
-    uint16_t jsonPort = jsonPortStr.empty() ? 12080 : std::atoi(jsonPortStr.c_str());
+    // Parse WiThrottle port
     uint16_t wtPort = wtPortStr.empty() ? 12090 : std::atoi(wtPortStr.c_str());
     
     // Set power manager name (use default if empty)
@@ -367,23 +356,26 @@ void JmriConfigScreen::connectToJmri()
     }
     m_jsonClient.setConfiguredPowerName(powerMgr);
     
-    ESP_LOGI(TAG, "Connecting to JMRI server: %s (JSON:%d, WiThrottle:%d, Power:%s)", 
-             serverIp.c_str(), jsonPort, wtPort, powerMgr.c_str());
+    ESP_LOGI(TAG, "Connecting to JMRI server: %s (WiThrottle:%d, Power:%s)", 
+             serverIp.c_str(), wtPort, powerMgr.c_str());
     
     // Save settings
     saveSettings();
     
-    // Connect JSON client
-    esp_err_t err = m_jsonClient.connect(serverIp, jsonPort);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to connect JSON client");
-    }
-    
-    // Connect WiThrottle client
-    err = m_wiThrottleClient.connect(serverIp, wtPort);
+    // Connect WiThrottle first - it will auto-discover JSON port
+    esp_err_t err = m_wiThrottleClient.connect(serverIp, wtPort);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect WiThrottle client");
     }
+    
+    // Set callback to connect JSON when port is discovered
+    m_wiThrottleClient.setWebPortCallback([this, serverIp](uint16_t jsonPort) {
+        ESP_LOGI(TAG, "Auto-connecting JSON client to port %d", jsonPort);
+        esp_err_t err = m_jsonClient.connect(serverIp, jsonPort);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to connect JSON client");
+        }
+    });
     
     // Update status
     updateStatus();
@@ -409,12 +401,10 @@ void JmriConfigScreen::saveSettings()
     }
     
     std::string serverIp = getServerIpText();
-    std::string jsonPort = getJsonPortText();
     std::string wtPort = getWiThrottlePortText();
     std::string powerMgr = getPowerManagerText();
     
     nvs_set_str(handle, NVS_KEY_SERVER_IP, serverIp.c_str());
-    nvs_set_str(handle, NVS_KEY_JSON_PORT, jsonPort.c_str());
     nvs_set_str(handle, NVS_KEY_WITHROTTLE_PORT, wtPort.c_str());
     nvs_set_str(handle, NVS_KEY_POWER_MANAGER, powerMgr.c_str());
     
@@ -442,12 +432,6 @@ void JmriConfigScreen::loadSettings()
         lv_textarea_set_text(m_serverIpInput, buffer);
     }
     
-    // Load JSON port
-    length = sizeof(buffer);
-    if (nvs_get_str(handle, NVS_KEY_JSON_PORT, buffer, &length) == ESP_OK) {
-        lv_textarea_set_text(m_jsonPortInput, buffer);
-    }
-    
     // Load WiThrottle port
     length = sizeof(buffer);
     if (nvs_get_str(handle, NVS_KEY_WITHROTTLE_PORT, buffer, &length) == ESP_OK) {
@@ -470,12 +454,6 @@ void JmriConfigScreen::loadSettings()
 std::string JmriConfigScreen::getServerIpText() const
 {
     const char* text = lv_textarea_get_text(m_serverIpInput);
-    return text ? std::string(text) : std::string();
-}
-
-std::string JmriConfigScreen::getJsonPortText() const
-{
-    const char* text = lv_textarea_get_text(m_jsonPortInput);
     return text ? std::string(text) : std::string();
 }
 

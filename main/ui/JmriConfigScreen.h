@@ -52,7 +52,6 @@ private:
     void loadSettings();
     
     std::string getServerIpText() const;
-    std::string getJsonPortText() const;
     std::string getWiThrottlePortText() const;
     std::string getPowerManagerText() const;
     
@@ -68,7 +67,6 @@ private:
     lv_obj_t* m_jsonStatusLabel;
     lv_obj_t* m_wiThrottleStatusLabel;
     lv_obj_t* m_serverIpInput;
-    lv_obj_t* m_jsonPortInput;
     lv_obj_t* m_wiThrottlePortInput;
     lv_obj_t* m_powerManagerInput;
     lv_obj_t* m_connectButton;

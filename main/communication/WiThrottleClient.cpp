@@ -17,8 +17,11 @@ WiThrottleClient::WiThrottleClient()
     , m_serverPort(12090)
     , m_mainTrackPower(PowerState::UNKNOWN)
     , m_progTrackPower(PowerState::UNKNOWN)
+    , m_webPort(0)
     , m_powerCallback(nullptr)
     , m_connectionCallback(nullptr)
+    , m_rosterCallback(nullptr)
+    , m_webPortCallback(nullptr)
     , m_receiveTaskHandle(nullptr)
     , m_running(false)
 {
@@ -91,8 +94,14 @@ esp_err_t WiThrottleClient::connect(const std::string& host, uint16_t port)
     ESP_LOGI(TAG, "Connected to WiThrottle server");
     setState(ConnectionState::CONNECTED);
     
-    // Send device name
+    // Send device name (identifies us to JMRI)
+    ESP_LOGI(TAG, "Sending device identification...");
     sendCommand(std::string("N") + "ESP32-Layout-Controller");
+    
+    // Send hardware identifier
+    sendCommand(std::string("H") + "ESP32-S3");
+    
+    ESP_LOGI(TAG, "Waiting for server messages (version, roster, etc.)...");
     
     // Start receive task
     m_running = true;
@@ -207,7 +216,8 @@ void WiThrottleClient::receiveTask(void* arg)
 
 void WiThrottleClient::processMessage(const std::string& message)
 {
-    ESP_LOGD(TAG, "Received: %s", message.c_str());
+    // Log at debug level for normal operation
+    ESP_LOGD(TAG, "RX: %s", message.c_str());
     
     if (message.empty()) {
         return;
@@ -217,16 +227,36 @@ void WiThrottleClient::processMessage(const std::string& message)
     char msgType = message[0];
     
     switch (msgType) {
-        case 'P':  // Power message
-            handlePowerMessage(message);
+        case 'P':  // Power or Web Port
+            if (message.length() > 1 && message[1] == 'W') {
+                // Web Port (PW<port>)
+                if (message.length() > 2) {
+                    m_webPort = std::atoi(message.substr(2).c_str());
+                    ESP_LOGI(TAG, "Discovered JSON web server port: %d", m_webPort);
+                    if (m_webPortCallback) {
+                        m_webPortCallback(m_webPort);
+                    }
+                }
+            } else if (message.length() > 1 && message[1] == 'P') {
+                // Power message (PPA)
+                handlePowerMessage(message);
+            }
             break;
             
         case 'V':  // Version
             ESP_LOGI(TAG, "Server version: %s", message.substr(1).c_str());
             break;
             
-        case 'R':  // Roster
-            ESP_LOGD(TAG, "Roster update received");
+        case 'R':  // Roster or Routes
+            if (message.length() > 1 && message[1] == 'L') {
+                // Roster List
+                handleRosterMessage(message);
+            } else if (message.length() > 1 && message[1] == 'C') {
+                // Roster Consist (ignore for now)
+                ESP_LOGD(TAG, "Roster consist message (ignored)");
+            } else {
+                ESP_LOGD(TAG, "Other roster message: %s", message.c_str());
+            }
             break;
             
         case 'H':  // Heartbeat response
@@ -304,6 +334,7 @@ void WiThrottleClient::setState(ConnectionState newState)
 esp_err_t WiThrottleClient::sendCommand(const std::string& command)
 {
     if (m_socket < 0) {
+        ESP_LOGW(TAG, "Cannot send command - not connected");
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -315,6 +346,93 @@ esp_err_t WiThrottleClient::sendCommand(const std::string& command)
         return ESP_FAIL;
     }
     
-    ESP_LOGD(TAG, "Sent: %s", command.c_str());
+    // Log all sent commands at INFO level for testing
+    ESP_LOGD(TAG, "TX: %s", command.c_str());
     return ESP_OK;
+}
+
+void WiThrottleClient::handleRosterMessage(const std::string& message)
+{
+    // Roster format: RL<count>]\[<name1>}|{<addr1>}|{<type1>]\[<name2>}|{<addr2>}|{<type2>...
+    // Example: RL2]\[56086}|{3}|{S]\[Shunter}|{4}|{S
+    // Delimiters: ]\[ (3 chars) separates entries, }|{ (3 chars) separates fields
+    
+    ESP_LOGI(TAG, "Parsing roster message");
+    
+    if (message.length() < 3 || message.substr(0, 2) != "RL") {
+        ESP_LOGW(TAG, "Invalid roster message format");
+        return;
+    }
+    
+    // Clear existing roster
+    m_roster.clear();
+    
+    // Find the count (ends with ])
+    size_t countEnd = message.find(']', 2);
+    if (countEnd == std::string::npos) {
+        ESP_LOGW(TAG, "No count delimiter found");
+        return;
+    }
+    
+    int count = std::atoi(message.substr(2, countEnd - 2).c_str());
+    ESP_LOGI(TAG, "Roster count: %d", count);
+    
+    // Parse each loco entry
+    // After count delimiter ], we start with ]\[ (backslash IS part of protocol)
+    size_t pos = countEnd + 1; // Position after the ]
+    
+    for (int i = 0; i < count; i++) {
+        // Expect ]\[ delimiter (3 characters: ], \, [)
+        if (pos + 2 >= message.length() || 
+            message[pos] != '\\' || message[pos + 1] != '[') {
+            ESP_LOGW(TAG, "Expected \\[ at position %d (got '%c%c')", 
+                     pos, message[pos], message[pos+1]);
+            break;
+        }
+        pos += 2; // Skip the \[
+        
+        // Find name (ends with }|{ delimiter)
+        size_t nameEnd = message.find("}|{", pos);
+        if (nameEnd == std::string::npos) {
+            ESP_LOGW(TAG, "No name delimiter at position %d", pos);
+            break;
+        }
+        std::string name = message.substr(pos, nameEnd - pos);
+        pos = nameEnd + 3; // Skip the }|{
+        
+        // Find address (ends with }|{)
+        size_t addrEnd = message.find("}|{", pos);
+        if (addrEnd == std::string::npos) {
+            ESP_LOGW(TAG, "No address delimiter at position %d", pos);
+            break;
+        }
+        std::string addrStr = message.substr(pos, addrEnd - pos);
+        int address = std::atoi(addrStr.c_str());
+        pos = addrEnd + 3;
+        
+        // Get address type (S or L)
+        char addressType = 'S';
+        if (pos < message.length()) {
+            addressType = message[pos];
+            pos++;
+        }
+        
+        // Skip the ] that ends this entry
+        if (pos < message.length() && message[pos] == ']') {
+            pos++; // Now positioned at \ for next entry's ]\[ delimiter
+        }
+        
+        // Add to roster
+        Locomotive loco(address, name, addressType);
+        m_roster.push_back(loco);
+        
+        ESP_LOGD(TAG, "  Loco %d: '%s' addr=%d (%c)", i + 1, name.c_str(), address, addressType);
+    }
+    
+    ESP_LOGI(TAG, "Roster loaded: %d locomotives", m_roster.size());
+    
+    // Notify callback
+    if (m_rosterCallback) {
+        m_rosterCallback(m_roster);
+    }
 }
