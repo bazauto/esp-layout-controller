@@ -131,6 +131,17 @@ public:
      * Should be called periodically when connected
      */
     void sendHeartbeat();
+    
+    /**
+     * @brief Start heartbeat task
+     * Automatically sends heartbeats every 30 seconds
+     */
+    void startHeartbeat();
+    
+    /**
+     * @brief Stop heartbeat task
+     */
+    void stopHeartbeat();
 
 private:
     void processMessage(const std::string& message);
@@ -139,11 +150,15 @@ private:
     esp_err_t sendJsonCommand(const std::string& type, const std::string& data);
     
     static void websocketEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
+    static void heartbeatTask(void* pvParameters);
     
     ConnectionState m_state;
     esp_websocket_client_handle_t m_client;
     std::string m_serverHost;
     uint16_t m_serverPort;
+    
+    // Heartbeat task
+    TaskHandle_t m_heartbeatTask;
     
     // Configured power manager name to control and monitor
     std::string m_configuredPowerName;

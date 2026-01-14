@@ -62,6 +62,9 @@ private:
     static void onJmriButtonClicked(lv_event_t* e);
     static void onTrackPowerClicked(lv_event_t* e);
     static void onJmriPowerChanged(void* userData, const std::string& powerName, JmriJsonClient::PowerState state);
+    static void onJmriConnectionChanged(void* userData, JmriJsonClient::ConnectionState state);
+    
+    void updateConnectionStatus();
     
     // LVGL UI components
     lv_obj_t* m_screen;
@@ -69,6 +72,7 @@ private:
     lv_obj_t* m_rightPanel;
     lv_obj_t* m_settingsButton;
     lv_obj_t* m_trackPowerButton;
+    lv_obj_t* m_connectionStatusLabel;
     
     // Throttle meters (C++ widgets)
     std::array<std::unique_ptr<ThrottleMeter>, 4> m_throttleMeters;

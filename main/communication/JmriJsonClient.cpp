@@ -44,6 +44,7 @@ JmriJsonClient::JmriJsonClient()
     , m_client(nullptr)
     , m_serverHost("")
     , m_serverPort(12080)
+    , m_heartbeatTask(nullptr)
     , m_configuredPowerName("DCC++")  // Default to DCC++
     , m_powerCallback(nullptr)
     , m_connectionCallback(nullptr)
@@ -52,6 +53,7 @@ JmriJsonClient::JmriJsonClient()
 
 JmriJsonClient::~JmriJsonClient()
 {
+    stopHeartbeat();
     disconnect();
 }
 
@@ -120,6 +122,9 @@ esp_err_t JmriJsonClient::connect(const std::string& host, uint16_t port)
 
 void JmriJsonClient::disconnect()
 {
+    // Stop heartbeat task first
+    stopHeartbeat();
+    
     if (m_client) {
         ESP_LOGI(TAG, "Disconnecting from JMRI JSON server");
         
@@ -223,6 +228,8 @@ void JmriJsonClient::websocketEventHandler(void* handler_args, esp_event_base_t 
         case WEBSOCKET_EVENT_CONNECTED: {
             ESP_LOGI(TAG, "WebSocket connected");
             client->setState(ConnectionState::CONNECTED);
+            // Start heartbeat task to keep connection alive
+            client->startHeartbeat();
             // Don't send immediately - wait for hello message first
             // The power list will be requested after we receive 'hello'
             break;
@@ -230,6 +237,7 @@ void JmriJsonClient::websocketEventHandler(void* handler_args, esp_event_base_t 
             
         case WEBSOCKET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "WebSocket disconnected");
+            client->stopHeartbeat();
             client->setState(ConnectionState::DISCONNECTED);
             break;
             
@@ -356,4 +364,56 @@ esp_err_t JmriJsonClient::sendJsonCommand(const std::string& type, const std::st
     
     // Always return OK since the commands actually work despite the error return
     return ESP_OK;
+}
+
+void JmriJsonClient::startHeartbeat()
+{
+    // Don't start if already running
+    if (m_heartbeatTask != nullptr) {
+        return;
+    }
+    
+    // Create heartbeat task
+    BaseType_t result = xTaskCreate(
+        heartbeatTask,
+        "jmri_heartbeat",
+        2048,
+        this,
+        5,
+        &m_heartbeatTask
+    );
+    
+    if (result == pdPASS) {
+        ESP_LOGI(TAG, "Heartbeat task started");
+    } else {
+        ESP_LOGE(TAG, "Failed to create heartbeat task");
+        m_heartbeatTask = nullptr;
+    }
+}
+
+void JmriJsonClient::stopHeartbeat()
+{
+    if (m_heartbeatTask != nullptr) {
+        ESP_LOGI(TAG, "Stopping heartbeat task");
+        vTaskDelete(m_heartbeatTask);
+        m_heartbeatTask = nullptr;
+    }
+}
+
+void JmriJsonClient::heartbeatTask(void* pvParameters)
+{
+    JmriJsonClient* client = static_cast<JmriJsonClient*>(pvParameters);
+    
+    ESP_LOGI(TAG, "Heartbeat task running");
+    
+    while (true) {
+        // Wait 30 seconds
+        vTaskDelay(pdMS_TO_TICKS(30000));
+        
+        // Send heartbeat if connected
+        if (client->isConnected()) {
+            ESP_LOGD(TAG, "Sending heartbeat");
+            client->sendHeartbeat();
+        }
+    }
 }
