@@ -60,6 +60,12 @@ The connection between ESP Board and the LCD is as follows:
 
 ### Configure the Project
 
+**Note for Windows users:** In a fresh PowerShell terminal, you must run the ESP-IDF export script before using `idf.py`:
+```powershell
+..\esp-idf\v5.5.2\esp-idf\export.ps1
+```
+This sets up the ESP-IDF environment variables and makes `idf.py` available in your terminal.
+
 Run `idf.py menuconfig` and navigate to `Example Configuration` menu.
 
 ### Build and Flash

@@ -27,6 +27,12 @@ void show_wifi_config_screen(void);
  */
 void close_wifi_config_screen(void);
 
+/**
+ * @brief Check if WiFi is connected
+ * @return true if WiFi is connected, false otherwise
+ */
+bool is_wifi_connected(void);
+
 #ifdef __cplusplus
 }
 #endif

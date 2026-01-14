@@ -46,10 +46,7 @@ void show_wifi_config_screen(void)
         g_wifiManager->initialize();
     }
     
-    // Clean up old screen if exists
-    if (g_wifiConfigScreen != nullptr) {
-        delete g_wifiConfigScreen;
-    }
+    // Don't delete old screen - LVGL will handle it
     
     // Create and show new WiFi config screen
     g_wifiConfigScreen = new WiFiConfigScreen(*g_wifiManager);
@@ -68,4 +65,12 @@ void close_wifi_config_screen(void)
         delete g_wifiConfigScreen;
         g_wifiConfigScreen = nullptr;
     }
+}
+
+bool is_wifi_connected(void)
+{
+    if (g_wifiManager == nullptr) {
+        return false;
+    }
+    return g_wifiManager->isConnected();
 }

@@ -32,7 +32,7 @@ WiFiConfigScreen::WiFiConfigScreen(WiFiManager& wifiManager)
 
 WiFiConfigScreen::~WiFiConfigScreen()
 {
-    close();
+    // Don't delete LVGL objects - LVGL manages screen lifecycle
 }
 
 lv_obj_t* WiFiConfigScreen::create()
@@ -263,13 +263,8 @@ void WiFiConfigScreen::updateStatus()
 
 void WiFiConfigScreen::close()
 {
-    if (m_screen) {
-        // Only delete if it's not the active screen
-        if (lv_scr_act() != m_screen) {
-            lv_obj_del(m_screen);
-        }
-        m_screen = nullptr;
-    }
+    // Don't manually delete screen - LVGL will handle it
+    m_screen = nullptr;
 }
 
 void WiFiConfigScreen::onScanButtonClicked(lv_event_t* e)

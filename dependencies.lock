@@ -11,6 +11,16 @@ dependencies:
       path: E:\Development\esp-layout-controller\components\espressif__esp_lcd_touch_gt911
       type: local
     version: 1.1.1~1
+  espressif/esp_websocket_client:
+    component_hash: c5a067a9fddea370c478017e66fac302f4b79c3d4027e9bdd42a019786cceb92
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.6.1
   idf:
     source:
       type: idf
@@ -24,8 +34,9 @@ dependencies:
 direct_dependencies:
 - espressif/esp_lcd_touch
 - espressif/esp_lcd_touch_gt911
+- espressif/esp_websocket_client
 - idf
 - lvgl/lvgl
-manifest_hash: d5d266152de678f38563fb78535c96ea22d9ead88642e70bb4e988de7ac24ddd
+manifest_hash: 2f2c26c6251df3f292f9cce2e954d0dc2720cd5a007eb323e44d87586678dd76
 target: esp32s3
 version: 2.0.0

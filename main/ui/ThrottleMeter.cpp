@@ -100,10 +100,8 @@ ThrottleMeter::~ThrottleMeter()
         stopAnimation();
     }
     
-    // LVGL will clean up child objects when container is deleted
-    if (m_container) {
-        lv_obj_del(m_container);
-    }
+    // Don't delete LVGL objects - they're managed by parent screen
+    // LVGL will clean up the hierarchy when the screen is unloaded
 }
 
 void ThrottleMeter::setValue(int32_t value)

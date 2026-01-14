@@ -14,11 +14,15 @@ idf_component_register(
         
         # Communication layer (C++)
         "communication/WiFiManager.cpp"
+        "communication/WiThrottleClient.cpp"
+        "communication/JmriJsonClient.cpp"
         
         # UI layer (C++)
         "ui/ThrottleMeter.cpp"
         "ui/WiFiConfigScreen.cpp"
         "ui/wifi_config_wrapper.cpp"
+        "ui/JmriConfigScreen.cpp"
+        "ui/jmri_config_wrapper.cpp"
         "ui/MainScreen.cpp"
         "ui/main_screen_wrapper.cpp"
         

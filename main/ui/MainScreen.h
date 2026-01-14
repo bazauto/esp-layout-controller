@@ -3,6 +3,8 @@
 #include "lvgl.h"
 #include "ThrottleMeter.h"
 #include "../model/Throttle.h"
+#include "../communication/WiThrottleClient.h"
+#include "../communication/JmriJsonClient.h"
 #include <array>
 #include <memory>
 
@@ -11,7 +13,7 @@
  * 
  * The main screen displays:
  * - 4 throttle meters in a 2x2 grid (left half)
- * - Right half reserved for future use (loco details, function buttons)
+ * - Track power controls (right side) - uses JMRI JSON API
  * - Settings button to access WiFi configuration
  * 
  * This replaces the legacy test_throttle_screen.c with a proper C++ implementation.
@@ -27,9 +29,11 @@ public:
     
     /**
      * @brief Create and show the main screen
+     * @param wiThrottleClient Optional WiThrottle client for DCC control
+     * @param jmriClient Optional JMRI JSON client for power control
      * @return The LVGL screen object
      */
-    lv_obj_t* create();
+    lv_obj_t* create(WiThrottleClient* wiThrottleClient = nullptr, JmriJsonClient* jmriClient = nullptr);
     
     /**
      * @brief Update throttle displays with current state
@@ -48,13 +52,23 @@ public:
      * @return Pointer to throttle or nullptr if invalid ID
      */
     Throttle* getThrottle(int throttleId);
-    
+
 private:
+    void createTrackPowerControls(lv_obj_t* parent);
+    void updateTrackPowerButton(lv_obj_t* button, JmriJsonClient::PowerState state);
+    
+    // Event handlers
+    static void onSettingsButtonClicked(lv_event_t* e);
+    static void onJmriButtonClicked(lv_event_t* e);
+    static void onTrackPowerClicked(lv_event_t* e);
+    static void onJmriPowerChanged(void* userData, const std::string& powerName, JmriJsonClient::PowerState state);
+    
     // LVGL UI components
     lv_obj_t* m_screen;
     lv_obj_t* m_leftPanel;
     lv_obj_t* m_rightPanel;
     lv_obj_t* m_settingsButton;
+    lv_obj_t* m_trackPowerButton;
     
     // Throttle meters (C++ widgets)
     std::array<std::unique_ptr<ThrottleMeter>, 4> m_throttleMeters;
@@ -62,8 +76,11 @@ private:
     // Throttle models
     std::array<Throttle, 4> m_throttles;
     
-    // Event handlers
-    static void onSettingsButtonClicked(lv_event_t* e);
+    // Client references (not owned)
+    WiThrottleClient* m_wiThrottleClient;
+    JmriJsonClient* m_jmriClient;
+    
+    // Event handlers (moved to private section above)
     
     // UI builders
     void createLeftPanel();

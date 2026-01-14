@@ -1,6 +1,13 @@
 #include "MainScreen.h"
 #include "wifi_config_wrapper.h"
+#include "jmri_config_wrapper.h"
 #include "esp_log.h"
+#include "lvgl_port.h"
+
+extern "C" {
+    bool lvgl_port_lock(int timeout_ms);
+    void lvgl_port_unlock(void);
+}
 
 static const char* TAG = "MainScreen";
 
@@ -13,6 +20,9 @@ MainScreen::MainScreen()
     , m_leftPanel(nullptr)
     , m_rightPanel(nullptr)
     , m_settingsButton(nullptr)
+    , m_trackPowerButton(nullptr)
+    , m_wiThrottleClient(nullptr)
+    , m_jmriClient(nullptr)
 {
     // Initialize throttles
     for (int i = 0; i < 4; ++i) {
@@ -22,16 +32,21 @@ MainScreen::MainScreen()
 
 MainScreen::~MainScreen()
 {
-    // LVGL will clean up objects when screen is deleted
-    if (m_screen) {
-        lv_obj_del(m_screen);
-    }
+    // Don't delete LVGL objects here - LVGL manages screen lifecycle
+    // When lv_scr_load() is called with a new screen, LVGL will clean up the old one
+    // Our ThrottleMeter objects will be destroyed naturally with their parent containers
 }
 
-lv_obj_t* MainScreen::create()
+lv_obj_t* MainScreen::create(WiThrottleClient* wiThrottleClient, JmriJsonClient* jmriClient)
 {
-    // Get the active screen (created by default)
-    m_screen = lv_scr_act();
+    m_wiThrottleClient = wiThrottleClient;
+    m_jmriClient = jmriClient;
+    
+    // Create a new screen or clean the current one
+    m_screen = lv_obj_create(nullptr);
+    
+    // Load the new screen (this makes it active and hides previous screen)
+    lv_scr_load(m_screen);
     
     // Create left and right panels
     createLeftPanel();
@@ -73,15 +88,18 @@ void MainScreen::createLeftPanel()
 
 void MainScreen::createRightPanel()
 {
-    // Right half - placeholder for future use
+    // Right half - loco details and track power controls
     m_rightPanel = lv_obj_create(lv_obj_get_parent(m_leftPanel));
     lv_obj_set_grid_cell(m_rightPanel, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
     
-    // Add a label as placeholder
+    // Add track power controls
+    createTrackPowerControls(m_rightPanel);
+    
+    // Add a label as placeholder for loco details (lower section)
     lv_obj_t* placeholderLabel = lv_label_create(m_rightPanel);
     lv_label_set_text(placeholderLabel, "Loco Details\n(Coming Soon)");
     lv_obj_set_style_text_align(placeholderLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_center(placeholderLabel);
+    lv_obj_align(placeholderLabel, LV_ALIGN_BOTTOM_MID, 0, -20);
 }
 
 void MainScreen::createThrottleMeters()
@@ -120,10 +138,27 @@ void MainScreen::createSettingsButton()
     lv_obj_align(m_settingsButton, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
     lv_obj_add_event_cb(m_settingsButton, onSettingsButtonClicked, LV_EVENT_CLICKED, this);
     
-    // Add gear icon
+    // Add WiFi icon
     lv_obj_t* btnLabel = lv_label_create(m_settingsButton);
-    lv_label_set_text(btnLabel, LV_SYMBOL_SETTINGS);
+    lv_label_set_text(btnLabel, LV_SYMBOL_WIFI);
     lv_obj_center(btnLabel);
+    
+    // JMRI button next to settings button
+    lv_obj_t* jmriButton = lv_btn_create(m_screen);
+    lv_obj_set_size(jmriButton, 80, 50);
+    lv_obj_align(jmriButton, LV_ALIGN_BOTTOM_RIGHT, -100, -10);
+    lv_obj_add_event_cb(jmriButton, onJmriButtonClicked, LV_EVENT_CLICKED, this);
+    
+    // Add settings icon
+    lv_obj_t* jmriLabel = lv_label_create(jmriButton);
+    lv_label_set_text(jmriLabel, LV_SYMBOL_SETTINGS);
+    lv_obj_center(jmriLabel);
+}
+
+void MainScreen::onJmriButtonClicked(lv_event_t* e)
+{
+    ESP_LOGI(TAG, "JMRI button clicked");
+    show_jmri_config_screen();
 }
 
 void MainScreen::onSettingsButtonClicked(lv_event_t* e)
@@ -157,4 +192,105 @@ Throttle* MainScreen::getThrottle(int throttleId)
         return nullptr;
     }
     return &m_throttles[throttleId];
+}
+
+void MainScreen::createTrackPowerControls(lv_obj_t* parent)
+{
+    // Create a container for track power button on the right side
+    lv_obj_t* powerContainer = lv_obj_create(parent);
+    lv_obj_set_size(powerContainer, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_align(powerContainer, LV_ALIGN_TOP_RIGHT, -20, 60);  // Below settings button
+    lv_obj_set_flex_flow(powerContainer, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(powerContainer, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(powerContainer, 15, 0);
+    
+    // Track power button
+    m_trackPowerButton = lv_btn_create(powerContainer);
+    lv_obj_set_size(m_trackPowerButton, LV_PCT(100), 80);
+    lv_obj_t* powerLabel = lv_label_create(m_trackPowerButton);
+    lv_label_set_text(powerLabel, "Track Power\n---");
+    lv_obj_center(powerLabel);
+    lv_obj_add_event_cb(m_trackPowerButton, onTrackPowerClicked, LV_EVENT_CLICKED, this);
+    
+    // Set initial state
+    if (m_jmriClient) {
+        updateTrackPowerButton(m_trackPowerButton, m_jmriClient->getPower());
+        
+        // Register for power state updates
+        m_jmriClient->setPowerStateCallback([this](const std::string& powerName, JmriJsonClient::PowerState state) {
+            onJmriPowerChanged(this, powerName, state);
+        });
+    }
+}
+
+void MainScreen::updateTrackPowerButton(lv_obj_t* button, JmriJsonClient::PowerState state)
+{
+    if (!button) return;
+    
+    lv_obj_t* label = lv_obj_get_child(button, 0);
+    if (!label) return;
+    
+    // Determine button color and text based on state
+    uint32_t color;
+    const char* stateText;
+    
+    switch (state) {
+        case JmriJsonClient::PowerState::ON:
+            color = 0x00AA00;  // Green
+            stateText = "ON";
+            break;
+        case JmriJsonClient::PowerState::OFF:
+            color = 0xAA0000;  // Red
+            stateText = "OFF";
+            break;
+        default:
+            color = 0x888888;  // Gray
+            stateText = "---";
+            break;
+    }
+    
+    lv_obj_set_style_bg_color(button, lv_color_hex(color), 0);
+    
+    // Update label text (preserve track name)
+    const char* currentText = lv_label_get_text(label);
+    std::string trackName;
+    if (strstr(currentText, "Main")) {
+        trackName = "Main Track\n";
+    } else if (strstr(currentText, "Prog")) {
+        trackName = "Prog Track\n";
+    } else {
+        trackName = "Track\n";
+    }
+    
+    std::string newText = trackName + stateText;
+    lv_label_set_text(label, newText.c_str());
+}
+
+void MainScreen::onTrackPowerClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    
+    if (!screen->m_jmriClient || !screen->m_jmriClient->isConnected()) {
+        ESP_LOGW(TAG, "Not connected to JMRI server");
+        return;
+    }
+    
+    // Toggle power state
+    auto currentState = screen->m_jmriClient->getPower();
+    bool newState = (currentState != JmriJsonClient::PowerState::ON);
+    
+    ESP_LOGI(TAG, "Toggling track power: %s", newState ? "ON" : "OFF");
+    screen->m_jmriClient->setPower(newState);
+}
+
+void MainScreen::onJmriPowerChanged(void* userData, const std::string& powerName, JmriJsonClient::PowerState state)
+{
+    MainScreen* screen = static_cast<MainScreen*>(userData);
+    
+    // Update the power button
+    // Note: This is called from JMRI JSON receive task, so we need LVGL lock
+    if (lvgl_port_lock(-1)) {
+        screen->updateTrackPowerButton(screen->m_trackPowerButton, state);
+        lvgl_port_unlock();
+    }
 }
