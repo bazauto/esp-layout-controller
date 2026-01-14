@@ -89,18 +89,95 @@ void MainScreen::createLeftPanel()
 
 void MainScreen::createRightPanel()
 {
-    // Right half - loco details and track power controls
+    // Right half - track power and test controls
     m_rightPanel = lv_obj_create(lv_obj_get_parent(m_leftPanel));
     lv_obj_set_grid_cell(m_rightPanel, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
+    lv_obj_set_flex_flow(m_rightPanel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(m_rightPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(m_rightPanel, 10, 0);
+    lv_obj_set_style_pad_row(m_rightPanel, 10, 0);
     
-    // Add track power controls
+    // Add track power controls at the top
     createTrackPowerControls(m_rightPanel);
     
-    // Add a label as placeholder for loco details (lower section)
-    lv_obj_t* placeholderLabel = lv_label_create(m_rightPanel);
-    lv_label_set_text(placeholderLabel, "Loco Details\n(Coming Soon)");
-    lv_obj_set_style_text_align(placeholderLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(placeholderLabel, LV_ALIGN_BOTTOM_MID, 0, -20);
+    // Test Controls Section
+    lv_obj_t* testLabel = lv_label_create(m_rightPanel);
+    lv_label_set_text(testLabel, "WiThrottle Test Controls");
+    lv_obj_set_style_text_font(testLabel, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(testLabel, lv_color_hex(0x00AAFF), 0);
+    lv_obj_set_style_pad_top(testLabel, 20, 0);
+    
+    // Info label
+    lv_obj_t* infoLabel = lv_label_create(m_rightPanel);
+    lv_label_set_text(infoLabel, "Controls first loco in roster on Throttle 'T'");
+    lv_obj_set_style_text_color(infoLabel, lv_color_hex(0x808080), 0);
+    
+    // Acquire button
+    lv_obj_t* acquireBtn = lv_btn_create(m_rightPanel);
+    lv_obj_set_size(acquireBtn, 250, 50);
+    lv_obj_add_event_cb(acquireBtn, onAcquireButtonClicked, LV_EVENT_CLICKED, this);
+    lv_obj_set_style_bg_color(acquireBtn, lv_color_hex(0x00AA00), 0);
+    lv_obj_t* acquireLabel = lv_label_create(acquireBtn);
+    lv_label_set_text(acquireLabel, "Acquire Loco");
+    lv_obj_center(acquireLabel);
+    
+    // Speed control buttons in a row
+    lv_obj_t* speedRow = lv_obj_create(m_rightPanel);
+    lv_obj_remove_style_all(speedRow);
+    lv_obj_set_size(speedRow, LV_PCT(100), 50);
+    lv_obj_set_flex_flow(speedRow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(speedRow, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    
+    // Speed buttons
+    const char* speedLabels[] = {"Stop", "Slow", "Med", "Fast"};
+    const int speeds[] = {0, 30, 60, 100};
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t* speedBtn = lv_btn_create(speedRow);
+        lv_obj_set_size(speedBtn, 60, 50);
+        lv_obj_set_user_data(speedBtn, (void*)(intptr_t)speeds[i]);
+        lv_obj_add_event_cb(speedBtn, onSpeedButtonClicked, LV_EVENT_CLICKED, this);
+        lv_obj_t* label = lv_label_create(speedBtn);
+        lv_label_set_text(label, speedLabels[i]);
+        lv_obj_center(label);
+    }
+    
+    // Direction buttons in a row
+    lv_obj_t* dirRow = lv_obj_create(m_rightPanel);
+    lv_obj_remove_style_all(dirRow);
+    lv_obj_set_size(dirRow, LV_PCT(100), 50);
+    lv_obj_set_flex_flow(dirRow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(dirRow, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    
+    lv_obj_t* fwdBtn = lv_btn_create(dirRow);
+    lv_obj_set_size(fwdBtn, 120, 50);
+    lv_obj_add_event_cb(fwdBtn, onForwardButtonClicked, LV_EVENT_CLICKED, this);
+    lv_obj_t* fwdLabel = lv_label_create(fwdBtn);
+    lv_label_set_text(fwdLabel, "Forward");
+    lv_obj_center(fwdLabel);
+    
+    lv_obj_t* revBtn = lv_btn_create(dirRow);
+    lv_obj_set_size(revBtn, 120, 50);
+    lv_obj_add_event_cb(revBtn, onReverseButtonClicked, LV_EVENT_CLICKED, this);
+    lv_obj_t* revLabel = lv_label_create(revBtn);
+    lv_label_set_text(revLabel, "Reverse");
+    lv_obj_center(revLabel);
+    
+    // Function F0 (lights) button
+    lv_obj_t* f0Btn = lv_btn_create(m_rightPanel);
+    lv_obj_set_size(f0Btn, 250, 50);
+    lv_obj_add_event_cb(f0Btn, onF0ButtonClicked, LV_EVENT_CLICKED, this);
+    lv_obj_t* f0Label = lv_label_create(f0Btn);
+    lv_label_set_text(f0Label, "Toggle F0 (Lights)");
+    lv_obj_center(f0Label);
+    
+    // Release button
+    lv_obj_t* releaseBtn = lv_btn_create(m_rightPanel);
+    lv_obj_set_size(releaseBtn, 250, 50);
+    lv_obj_add_event_cb(releaseBtn, onReleaseButtonClicked, LV_EVENT_CLICKED, this);
+    lv_obj_set_style_bg_color(releaseBtn, lv_color_hex(0xAA0000), 0);
+    lv_obj_t* releaseLabel = lv_label_create(releaseBtn);
+    lv_label_set_text(releaseLabel, "Release Loco");
+    lv_obj_center(releaseLabel);
 }
 
 void MainScreen::createThrottleMeters()
@@ -349,3 +426,100 @@ void MainScreen::updateConnectionStatus()
     lv_obj_set_style_text_color(m_connectionStatusLabel, lv_color_hex(color), 0);
 }
 
+// Test control event handlers
+void MainScreen::onAcquireButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    
+    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGW(TAG, "WiThrottle not connected");
+        return;
+    }
+    
+    // Get first loco from roster
+    const auto& roster = screen->m_wiThrottleClient->getRoster();
+    if (roster.empty()) {
+        ESP_LOGW(TAG, "No locomotives in roster");
+        return;
+    }
+    
+    const auto& loco = roster[0];
+    bool isLong = (loco.addressType == 'L');
+    
+    ESP_LOGI(TAG, "Acquiring loco: %s (addr=%d, type=%c)", 
+             loco.name.c_str(), loco.address, loco.addressType);
+    
+    screen->m_wiThrottleClient->acquireLocomotive('T', loco.address, isLong);
+}
+
+void MainScreen::onSpeedButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    lv_obj_t* btn = lv_event_get_target(e);
+    
+    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGW(TAG, "WiThrottle not connected");
+        return;
+    }
+    
+    int speed = (int)(intptr_t)lv_obj_get_user_data(btn);
+    ESP_LOGI(TAG, "Setting speed to %d", speed);
+    
+    screen->m_wiThrottleClient->setSpeed('T', speed);
+}
+
+void MainScreen::onForwardButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    
+    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGW(TAG, "WiThrottle not connected");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Setting direction: FORWARD");
+    screen->m_wiThrottleClient->setDirection('T', true);
+}
+
+void MainScreen::onReverseButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    
+    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGW(TAG, "WiThrottle not connected");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Setting direction: REVERSE");
+    screen->m_wiThrottleClient->setDirection('T', false);
+}
+
+void MainScreen::onF0ButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    
+    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGW(TAG, "WiThrottle not connected");
+        return;
+    }
+    
+    // Toggle F0 - we'll just send ON for now (could track state later)
+    static bool f0State = false;
+    f0State = !f0State;
+    
+    ESP_LOGI(TAG, "Setting F0: %s", f0State ? "ON" : "OFF");
+    screen->m_wiThrottleClient->setFunction('T', 0, f0State);
+}
+
+void MainScreen::onReleaseButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    
+    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGW(TAG, "WiThrottle not connected");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Releasing throttle T");
+    screen->m_wiThrottleClient->releaseLocomotive('T');
+}

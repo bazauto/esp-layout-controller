@@ -64,6 +64,14 @@ private:
     static void onJmriPowerChanged(void* userData, const std::string& powerName, JmriJsonClient::PowerState state);
     static void onJmriConnectionChanged(void* userData, JmriJsonClient::ConnectionState state);
     
+    // Test control event handlers
+    static void onAcquireButtonClicked(lv_event_t* e);
+    static void onSpeedButtonClicked(lv_event_t* e);
+    static void onForwardButtonClicked(lv_event_t* e);
+    static void onReverseButtonClicked(lv_event_t* e);
+    static void onF0ButtonClicked(lv_event_t* e);
+    static void onReleaseButtonClicked(lv_event_t* e);
+    
     void updateConnectionStatus();
     
     // LVGL UI components

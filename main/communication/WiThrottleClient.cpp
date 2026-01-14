@@ -161,6 +161,154 @@ WiThrottleClient::PowerState WiThrottleClient::getTrackPower(const std::string& 
     return PowerState::UNKNOWN;
 }
 
+esp_err_t WiThrottleClient::acquireLocomotive(char throttleId, int address, bool isLongAddress)
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // WiThrottle protocol: M<throttleId>+<addressType><address><;><addressType><address>
+    // Example: MT+S3<;>S3 (acquire short address 3 on throttle T)
+    // The address format is repeated: once after + and once after <;>
+    // Throttle IDs are typically single characters: T, S, 0-9, etc.
+    // Address types: S (short, 1-127) or L (long, 128-9999)
+    char addressType = isLongAddress ? 'L' : 'S';
+    
+    std::string command = "M" + std::string(1, throttleId) + 
+                          "+" + std::string(1, addressType) + std::to_string(address) +
+                          "<;>" + std::string(1, addressType) + std::to_string(address);
+    
+    ESP_LOGI(TAG, "Acquiring loco %d (%c) on throttle %c", address, addressType, throttleId);
+    
+    esp_err_t result = sendCommand(command);
+    
+    // Track the acquired loco state for this throttle
+    if (result == ESP_OK) {
+        m_throttleStates[throttleId].acquired = true;
+        m_throttleStates[throttleId].address = address;
+        m_throttleStates[throttleId].addressType = addressType;
+    }
+    
+    return result;
+}
+
+esp_err_t WiThrottleClient::releaseLocomotive(char throttleId)
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // WiThrottle protocol: M<throttleId>-<addressType><address><;>r
+    // Or to release ALL locos on throttle: M<throttleId>-*<;>r
+    // Example: MT-*<;>r (release all locos on throttle T)
+    std::string command = "M" + std::string(1, throttleId) + "-*<;>r";
+    
+    ESP_LOGI(TAG, "Releasing throttle %c", throttleId);
+    
+    esp_err_t result = sendCommand(command);
+    
+    // Clear the throttle state
+    if (result == ESP_OK) {
+        m_throttleStates[throttleId].acquired = false;
+        m_throttleStates[throttleId].address = 0;
+        m_throttleStates[throttleId].addressType = 'S';
+    }
+    
+    return result;
+}
+
+esp_err_t WiThrottleClient::setSpeed(char throttleId, int speed)
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Check if throttle has an acquired loco
+    auto it = m_throttleStates.find(throttleId);
+    if (it == m_throttleStates.end() || !it->second.acquired) {
+        ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Clamp speed to valid range
+    if (speed < 0) speed = 0;
+    if (speed > 126) speed = 126;
+    
+    // WiThrottle protocol: M<throttleId>A<addressType><address><;>V<speed>
+    // Example: MTAS3<;>V50 (set loco S3 on throttle T to speed 50)
+    const auto& state = it->second;
+    std::string command = "M" + std::string(1, throttleId) + 
+                         "A" + std::string(1, state.addressType) + std::to_string(state.address) +
+                         "<;>V" + std::to_string(speed);
+    
+    ESP_LOGD(TAG, "Setting throttle %c speed to %d", throttleId, speed);
+    
+    return sendCommand(command);
+}
+
+esp_err_t WiThrottleClient::setDirection(char throttleId, bool forward)
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Check if throttle has an acquired loco
+    auto it = m_throttleStates.find(throttleId);
+    if (it == m_throttleStates.end() || !it->second.acquired) {
+        ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // WiThrottle protocol: M<throttleId>A<addressType><address><;>R<direction>
+    // R1 = forward, R0 = reverse
+    // Example: MTAS3<;>R1 (set loco S3 on throttle T forward)
+    const auto& state = it->second;
+    std::string command = "M" + std::string(1, throttleId) + 
+                         "A" + std::string(1, state.addressType) + std::to_string(state.address) +
+                         "<;>R" + (forward ? "1" : "0");
+    
+    ESP_LOGI(TAG, "Setting throttle %c direction: %s", throttleId, forward ? "FORWARD" : "REVERSE");
+    
+    return sendCommand(command);
+}
+
+esp_err_t WiThrottleClient::setFunction(char throttleId, int function, bool state)
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Check if throttle has an acquired loco
+    auto it = m_throttleStates.find(throttleId);
+    if (it == m_throttleStates.end() || !it->second.acquired) {
+        ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Validate function number
+    if (function < 0 || function > 28) {
+        ESP_LOGW(TAG, "Invalid function number: %d", function);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // WiThrottle protocol: M<throttleId>A<addressType><address><;>F<state><function>
+    // F1<function> = activate, F0<function> = deactivate
+    // Example: MTAS3<;>F10 (activate F0 on loco S3, throttle T)
+    const auto& throttleState = it->second;
+    std::string command = "M" + std::string(1, throttleId) + 
+                         "A" + std::string(1, throttleState.addressType) + std::to_string(throttleState.address) +
+                         "<;>F" + (state ? "1" : "0") + std::to_string(function);
+    
+    ESP_LOGD(TAG, "Setting throttle %c function F%d: %s", throttleId, function, state ? "ON" : "OFF");
+    
+    return sendCommand(command);
+}
+
 void WiThrottleClient::sendHeartbeat()
 {
     if (isConnected()) {

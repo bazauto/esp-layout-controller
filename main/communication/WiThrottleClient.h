@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <functional>
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -126,6 +127,47 @@ public:
     PowerState getTrackPower(const std::string& track) const;
     
     /**
+     * @brief Acquire a locomotive for throttle control
+     * @param throttleId Throttle identifier (0-3 for our 4 throttles)
+     * @param address Locomotive DCC address
+     * @param isLongAddress True for long address (L), false for short (S)
+     * @return ESP_OK on success
+     */
+    esp_err_t acquireLocomotive(char throttleId, int address, bool isLongAddress);
+    
+    /**
+     * @brief Release a locomotive from throttle control
+     * @param throttleId Throttle identifier (0-3)
+     * @return ESP_OK on success
+     */
+    esp_err_t releaseLocomotive(char throttleId);
+    
+    /**
+     * @brief Set locomotive speed
+     * @param throttleId Throttle identifier (0-3)
+     * @param speed Speed value (0-126, where 0=stop, 1=emergency stop)
+     * @return ESP_OK on success
+     */
+    esp_err_t setSpeed(char throttleId, int speed);
+    
+    /**
+     * @brief Set locomotive direction
+     * @param throttleId Throttle identifier (0-3)
+     * @param forward True for forward, false for reverse
+     * @return ESP_OK on success
+     */
+    esp_err_t setDirection(char throttleId, bool forward);
+    
+    /**
+     * @brief Set locomotive function state
+     * @param throttleId Throttle identifier (0-3)
+     * @param function Function number (0-28)
+     * @param state True to activate, false to deactivate
+     * @return ESP_OK on success
+     */
+    esp_err_t setFunction(char throttleId, int function, bool state);
+    
+    /**
      * @brief Set power state change callback
      */
     void setPowerStateCallback(PowerStateCallback callback) { m_powerCallback = callback; }
@@ -169,6 +211,16 @@ private:
     esp_err_t sendCommand(const std::string& command);
     
     static void receiveTask(void* arg);
+    
+    // Throttle state tracking
+    struct ThrottleState {
+        bool acquired;
+        int address;
+        char addressType;  // 'S' or 'L'
+        
+        ThrottleState() : acquired(false), address(0), addressType('S') {}
+    };
+    std::map<char, ThrottleState> m_throttleStates;  // Key is throttleId
     
     ConnectionState m_state;
     int m_socket;
