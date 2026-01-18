@@ -8,13 +8,14 @@
   "idf.port": "/dev/ttyACM0",
   "idf.toolsPath": "/home/pbarrett/.espressif",
   "idf.customExtraVars": {
-    "IDF_TARGET": "esp32s3"
+    "IDF_TARGET": "esp32s3",
+    "SDKCONFIG_DEFAULTS": "sdkconfig.defaults"
   },
-  "clangd.path": "/home/pbarrett/.espressif/tools/esp-clang/esp-19.1.2_20250312/esp-clang/bin/clangd",
+  "clangd.path": "E:\\Development\\esp-idf\\tools\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=/home/pbarrett/Development/esp-screen-test/build"
+    "--compile-commands-dir=e:\\Development\\esp-layout-controller\\build"
   ],
   "idf.flashType": "UART",
   "idf.portWin": "COM4"
