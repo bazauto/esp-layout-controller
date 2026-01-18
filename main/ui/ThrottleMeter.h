@@ -76,7 +76,57 @@ public:
      */
     lv_obj_t* getContainer() const { return m_container; }
     
+    /**
+     * @brief Set locomotive information
+     * @param name Locomotive name
+     * @param address Locomotive address
+     */
+    void setLocomotive(const char* name, int address);
+    
+    /**
+     * @brief Clear locomotive information
+     */
+    void clearLocomotive();
+    
+    /**
+     * @brief Set which knob is assigned (0=left, 1=right, -1=none)
+     * @param knobId Knob ID or -1 for none
+     */
+    void setAssignedKnob(int knobId);
+    
+    /**
+     * @brief Set knob indicator availability
+     * @param knobId Knob ID (0 or 1)
+     * @param available True if knob can be assigned, false if disabled
+     */
+    void setKnobAvailable(int knobId, bool available);
+    
+    /**
+     * @brief Set knob indicator touch callback
+     * @param callback Callback function
+     * @param userData User data passed to callback
+     */
+    void setKnobTouchCallback(lv_event_cb_t callback, void* userData);
+    
+    /**
+     * @brief Set functions button callback
+     * @param callback Callback function
+     * @param userData User data passed to callback
+     */
+    void setFunctionsCallback(lv_event_cb_t callback, void* userData);
+    
+    /**
+     * @brief Set release button callback
+     * @param callback Callback function
+     * @param userData User data passed to callback
+     */
+    void setReleaseCallback(lv_event_cb_t callback, void* userData);
+
 private:
+    void createKnobIndicators();
+    void createButtons();
+    void updateKnobIndicators();
+    
     // LVGL objects
     lv_obj_t* m_container;
     lv_obj_t* m_meter;
@@ -84,6 +134,10 @@ private:
     lv_meter_indicator_t* m_needle;
     lv_obj_t* m_valueLabel;
     lv_obj_t* m_unitLabel;
+    lv_obj_t* m_locoLabel;           // Loco name and address
+    lv_obj_t* m_knobIndicators[2];   // L and R indicators
+    lv_obj_t* m_functionsButton;
+    lv_obj_t* m_releaseButton;
     
     // State
     int32_t m_min;
@@ -91,6 +145,9 @@ private:
     int32_t m_value;
     float m_scale;
     bool m_animRunning;
+    int m_assignedKnob;              // -1, 0, or 1
+    bool m_knobAvailable[2];         // Availability for each knob
+    void* m_userData;                 // User data for callbacks
     
     // Constants
     static constexpr lv_coord_t BASE_SIZE = 200;

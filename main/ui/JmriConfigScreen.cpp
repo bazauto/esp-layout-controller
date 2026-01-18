@@ -18,6 +18,7 @@ static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SERVER_IP = "server_ip";
 static const char* NVS_KEY_WITHROTTLE_PORT = "wt_port";
 static const char* NVS_KEY_POWER_MANAGER = "power_mgr";
+static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 
 JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient, WiThrottleClient& wiThrottleClient)
     : m_screen(nullptr)
@@ -171,19 +172,27 @@ void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
     lv_obj_add_event_cb(m_powerManagerInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
     lv_obj_add_event_cb(m_powerManagerInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
     
-    // Info box
-    // lv_obj_t* infoBox = lv_obj_create(rightColumn);
-    // lv_obj_set_size(infoBox, LV_PCT(100), LV_SIZE_CONTENT);
-    // lv_obj_set_style_bg_color(infoBox, lv_color_hex(0x2A2A2A), 0);
-    // lv_obj_set_style_border_color(infoBox, lv_color_hex(0x00AAFF), 0);
-    // lv_obj_set_style_border_width(infoBox, 1, 0);
-    // lv_obj_set_style_pad_all(infoBox, 8, 0);
-    // lv_obj_set_style_radius(infoBox, 5, 0);
+    // Speed Steps label
+    lv_obj_t* speedStepsLabel = lv_label_create(rightColumn);
+    lv_label_set_text(speedStepsLabel, "Speed Steps per Click:");
+    lv_obj_set_width(speedStepsLabel, LV_PCT(100));
     
+    // Speed Steps input
+    m_speedStepsInput = lv_textarea_create(rightColumn);
+    lv_textarea_set_one_line(m_speedStepsInput, true);
+    lv_textarea_set_placeholder_text(m_speedStepsInput, "4");
+    lv_textarea_set_text(m_speedStepsInput, "4");
+    lv_obj_set_width(m_speedStepsInput, LV_PCT(100));
+    lv_textarea_set_accepted_chars(m_speedStepsInput, "0123456789");
+    lv_textarea_set_max_length(m_speedStepsInput, 2);
+    lv_obj_add_event_cb(m_speedStepsInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
+    lv_obj_add_event_cb(m_speedStepsInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
+
+    // Info label
     lv_obj_t* infoLabel = lv_label_create(rightColumn);
     lv_label_set_text(infoLabel, 
         "JSON API port is auto-discovered by WiThrottle.\n\n"
-        "Common names:\n"
+        "Common power manager names:\n"
         "• DCC++\n"
         "• main\n"
         "• MQTT");
@@ -403,15 +412,20 @@ void JmriConfigScreen::saveSettings()
     std::string serverIp = getServerIpText();
     std::string wtPort = getWiThrottlePortText();
     std::string powerMgr = getPowerManagerText();
+    const char* speedStepsText = lv_textarea_get_text(m_speedStepsInput);
+    int speedSteps = speedStepsText ? atoi(speedStepsText) : 4;
+    if (speedSteps < 1) speedSteps = 1;
+    if (speedSteps > 20) speedSteps = 20;
     
     nvs_set_str(handle, NVS_KEY_SERVER_IP, serverIp.c_str());
     nvs_set_str(handle, NVS_KEY_WITHROTTLE_PORT, wtPort.c_str());
     nvs_set_str(handle, NVS_KEY_POWER_MANAGER, powerMgr.c_str());
+    nvs_set_i32(handle, NVS_KEY_SPEED_STEPS, speedSteps);
     
     nvs_commit(handle);
     nvs_close(handle);
     
-    ESP_LOGI(TAG, "JMRI settings saved (Power Manager: %s)", powerMgr.c_str());
+    ESP_LOGI(TAG, "JMRI settings saved (Power Manager: %s, Speed Steps: %d)", powerMgr.c_str(), speedSteps);
 }
 
 void JmriConfigScreen::loadSettings()
@@ -445,6 +459,15 @@ void JmriConfigScreen::loadSettings()
         // Update the JMRI client with the configured power manager name
         m_jsonClient.setConfiguredPowerName(buffer);
         ESP_LOGI(TAG, "Power Manager configured: %s", buffer);
+    }
+    
+    // Load Speed Steps
+    int32_t speedSteps = 4; // default
+    if (nvs_get_i32(handle, NVS_KEY_SPEED_STEPS, &speedSteps) == ESP_OK) {
+        char speedStepsStr[8];
+        snprintf(speedStepsStr, sizeof(speedStepsStr), "%d", (int)speedSteps);
+        lv_textarea_set_text(m_speedStepsInput, speedStepsStr);
+        ESP_LOGI(TAG, "Speed Steps configured: %d", (int)speedSteps);
     }
     
     nvs_close(handle);

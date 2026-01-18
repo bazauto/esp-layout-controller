@@ -2,15 +2,31 @@
 
 #include <memory>
 #include <cstdint>
+#include <vector>
+#include <string>
 #include "Locomotive.h"
+
+/**
+ * @brief Function state and metadata
+ */
+struct Function {
+    int number;              // 0-28
+    std::string label;       // "Headlight", "Bell", etc. (empty if unlabeled)
+    bool state;              // Current on/off state
+    
+    Function() : number(0), state(false) {}
+    Function(int num, const std::string& lbl, bool st) 
+        : number(num), label(lbl), state(st) {}
+};
 
 /**
  * @brief Represents a single throttle instance with its state and assigned locomotive.
  * 
  * Each throttle can be in one of several states:
- * - UNALLOCATED: No loco assigned, no knob assigned
- * - SELECTING_LOCO: Knob assigned, user is scrolling through roster
- * - ALLOCATED: Loco assigned, knob controls speed
+ * - UNALLOCATED: No loco, no knob assigned
+ * - SELECTING: Knob assigned, user is scrolling through roster
+ * - ALLOCATED_WITH_KNOB: Loco assigned, knob controlling it
+ * - ALLOCATED_NO_KNOB: Loco assigned, but knob moved elsewhere
  * 
  * The throttle tracks which physical knob (0 or 1) is currently controlling it.
  */
@@ -20,9 +36,10 @@ public:
      * @brief Throttle state machine states
      */
     enum class State {
-        UNALLOCATED,     // No loco, no knob
-        SELECTING_LOCO,  // Knob assigned, selecting from roster
-        ALLOCATED        // Loco assigned and active
+        UNALLOCATED,          // No loco, no knob
+        SELECTING,            // Knob assigned, selecting from roster
+        ALLOCATED_WITH_KNOB,  // Loco assigned, knob controls it
+        ALLOCATED_NO_KNOB     // Loco assigned, but no knob
     };
 
     /**
@@ -52,6 +69,9 @@ public:
     int getAssignedKnob() const { return m_assignedKnob; }
     Locomotive* getLocomotive() const { return m_locomotive.get(); }
     bool hasLocomotive() const { return m_locomotive != nullptr; }
+    int getCurrentSpeed() const { return m_currentSpeed; }
+    bool getDirection() const { return m_direction; }
+    const std::vector<Function>& getFunctions() const { return m_functions; }
 
     // State transitions
     /**
@@ -86,10 +106,45 @@ public:
      * @return true if this knob controls this throttle
      */
     bool isControlledByKnob(int knobId) const;
+    
+    /**
+     * @brief Update speed from throttle change notification
+     * @param speed New speed value (0-126)
+     */
+    void setSpeed(int speed);
+    
+    /**
+     * @brief Update direction from throttle change notification
+     * @param forward true for forward, false for reverse
+     */
+    void setDirection(bool forward);
+    
+    /**
+     * @brief Update function state from throttle change notification
+     * @param functionNumber Function number (0-28)
+     * @param state New state (true=on, false=off)
+     */
+    void setFunctionState(int functionNumber, bool state);
+    
+    /**
+     * @brief Add function to the list (from acquire response)
+     * @param function Function to add
+     */
+    void addFunction(const Function& function);
+    
+    /**
+     * @brief Clear all functions
+     */
+    void clearFunctions();
 
 private:
     int m_throttleId;                        // 0-3
     State m_state;
     int m_assignedKnob;                      // KNOB_NONE, KNOB_1, or KNOB_2
     std::unique_ptr<Locomotive> m_locomotive;
+    
+    // Loco control state (when allocated)
+    int m_currentSpeed;                      // 0-126
+    bool m_direction;                        // true=forward, false=reverse
+    std::vector<Function> m_functions;       // Available functions for this loco
 };

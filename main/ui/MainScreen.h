@@ -2,7 +2,9 @@
 
 #include "lvgl.h"
 #include "ThrottleMeter.h"
+#include "VirtualEncoderPanel.h"
 #include "../model/Throttle.h"
+#include "../controller/ThrottleController.h"
 #include "../communication/WiThrottleClient.h"
 #include "../communication/JmriJsonClient.h"
 #include <array>
@@ -29,11 +31,12 @@ public:
     
     /**
      * @brief Create and show the main screen
-     * @param wiThrottleClient Optional WiThrottle client for DCC control
-     * @param jmriClient Optional JMRI JSON client for power control
+     * @param wiThrottleClient WiThrottle client for DCC control
+     * @param jmriClient JMRI JSON client for power control
+     * @param throttleController Throttle controller (owned by application layer)
      * @return The LVGL screen object
      */
-    lv_obj_t* create(WiThrottleClient* wiThrottleClient = nullptr, JmriJsonClient* jmriClient = nullptr);
+    lv_obj_t* create(WiThrottleClient* wiThrottleClient, JmriJsonClient* jmriClient, ThrottleController* throttleController);
     
     /**
      * @brief Update throttle displays with current state
@@ -70,7 +73,7 @@ private:
     static void onForwardButtonClicked(lv_event_t* e);
     static void onReverseButtonClicked(lv_event_t* e);
     static void onF0ButtonClicked(lv_event_t* e);
-    static void onReleaseButtonClicked(lv_event_t* e);
+    static void onOldReleaseButtonClicked(lv_event_t* e);  // Old test button
     
     void updateConnectionStatus();
     
@@ -85,12 +88,25 @@ private:
     // Throttle meters (C++ widgets)
     std::array<std::unique_ptr<ThrottleMeter>, 4> m_throttleMeters;
     
-    // Throttle models
-    std::array<Throttle, 4> m_throttles;
+    // Virtual encoder panel for testing
+    std::unique_ptr<VirtualEncoderPanel> m_virtualEncoderPanel;
+    
+    // Throttle controller (not owned - managed at application layer)
+    ThrottleController* m_throttleController;
     
     // Client references (not owned)
     WiThrottleClient* m_wiThrottleClient;
     JmriJsonClient* m_jmriClient;
+    
+    // Throttle UI event handlers
+    static void onKnobIndicatorTouched(lv_event_t* e);
+    static void onFunctionsButtonClicked(lv_event_t* e);
+    static void onReleaseButtonClicked(lv_event_t* e);
+    static void onUIUpdateNeeded(void* userData);
+    
+    // Virtual encoder callbacks
+    static void onVirtualEncoderRotation(void* userData, int knobId, int delta);
+    static void onVirtualEncoderPress(void* userData, int knobId);
     
     // Event handlers (moved to private section above)
     

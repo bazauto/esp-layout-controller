@@ -1,235 +1,112 @@
 # GitHub Copilot Instructions for ESP Layout Controller
 
 ## Project Context
-This is an ESP32-S3 firmware project for a model railway control interface using LVGL for UI, WiThrottle protocol for loco control, and MQTT for cab signals. See PROJECT_OVERVIEW.md for complete project description.
+ESP32-S3 model railway control interface: LVGL UI, WiThrottle protocol, 4 throttles, 2 rotary encoders.
+See `docs/PROJECT_OVERVIEW.md` for complete description.
 
-## Code Style & Standards
+## Code Style
 
-### Language & Version
-- **Primary Language**: C++ (C++17 or later)
-- **Legacy Code**: Some C code exists, migrate to C++ as we work on files
-- **Build System**: ESP-IDF CMake-based build
-
-### Naming Conventions
-```cpp
-// Classes: PascalCase
-class ThrottleController { };
-
-// Methods/Functions: camelCase
-void assignKnob(int knobId);
-
-// Member variables: m_ prefix + camelCase
-int m_currentSpeed;
-Locomotive* m_assignedLoco;
-
-// Constants: UPPER_SNAKE_CASE
-const int MAX_THROTTLES = 4;
-
-// Enums: PascalCase for type, UPPER_SNAKE_CASE for values
-enum class ThrottleState {
-    UNALLOCATED,
-    SELECTING_LOCO,
-    ALLOCATED
-};
-```
+### Language & Naming
+- **C++ (C++17)**: All application code
+- **Classes**: PascalCase (`ThrottleController`)
+- **Methods**: camelCase (`assignKnob`)
+- **Members**: `m_` prefix (`m_currentSpeed`)
+- **Constants**: UPPER_SNAKE_CASE (`MAX_THROTTLES`)
+- **Enums**: PascalCase type, UPPER values (`ThrottleState::ALLOCATED`)
 
 ### File Organization
-- **Header files**: `.h` or `.hpp` extensions
-- **Implementation**: `.cpp` extensions
-- **One class per file**: `ThrottleController.h` / `ThrottleController.cpp`
-- **Directory structure**:
-  ```
-  main/
-    ├── hardware/       # Hardware abstraction (encoders, I2C)
-    ├── communication/  # WiThrottle, MQTT clients
-    ├── model/          # Data models (Loco, Throttle, Roster)
-    ├── controller/     # Business logic controllers
-    ├── ui/             # LVGL UI components
-    ├── utils/          # Helper functions, utilities
-    └── main.cpp        # Application entry
-  ```
-
-### Header File Structure
-```cpp
-#pragma once
-
-// System includes
-#include <cstdint>
-#include <memory>
-
-// ESP-IDF includes
-#include "esp_log.h"
-
-// Third-party includes
-#include "lvgl.h"
-
-// Project includes
-#include "Locomotive.h"
-
-class ClassName {
-public:
-    // Public types and constants
-    enum class State { };
-    
-    // Constructors/Destructors
-    ClassName();
-    ~ClassName();
-    
-    // Delete copy/move if not needed
-    ClassName(const ClassName&) = delete;
-    ClassName& operator=(const ClassName&) = delete;
-    
-    // Public methods
-    void publicMethod();
-    
-private:
-    // Private methods
-    void privateMethod();
-    
-    // Member variables (m_ prefix)
-    int m_memberVar;
-    std::unique_ptr<Dependency> m_dependency;
-};
+```
+main/
+  ├── hardware/       # HAL (encoders, I2C)
+  ├── communication/  # WiThrottle, MQTT
+  ├── model/          # Data (Loco, Throttle, Knob)
+  ├── controller/     # Business logic
+  └── ui/             # LVGL screens
 ```
 
-### Class Design Principles
-- **RAII**: Use constructors/destructors for resource management
-- **Single Responsibility**: Each class has one clear purpose
-- **Dependency Injection**: Pass dependencies via constructor
-- **Smart Pointers**: Use `std::unique_ptr` and `std::shared_ptr` appropriately
-- **Const Correctness**: Mark methods `const` when they don't modify state
-- **Interface Segregation**: Small, focused interfaces
+### Class Structure
+- One class per file
+- RAII for resources
+- Delete copy/move if not needed
+- Dependency injection via constructor
+- Const correctness
 
-### ESP-IDF Specific
-- **Logging**: Use ESP_LOG macros
-  ```cpp
-  static const char* TAG = "ThrottleController";
-  ESP_LOGI(TAG, "Throttle %d assigned to loco %d", throttleId, locoAddr);
-  ESP_LOGW(TAG, "Connection lost, attempting reconnect");
-  ESP_LOGE(TAG, "Failed to parse roster: %s", error);
-  ```
-- **Tasks**: Use FreeRTOS tasks appropriately
-  ```cpp
-  xTaskCreate(taskFunction, "TaskName", 4096, nullptr, 5, &taskHandle);
-  ```
-- **Memory**: Be mindful of stack sizes, use heap judiciously
-- **GPIO/I2C**: Use ESP-IDF driver APIs, not direct register access
+## Architecture
 
-### LVGL UI Guidelines
-- **Object Lifecycle**: Track LVGL objects carefully, they're managed by LVGL
-- **Callbacks**: Use `lv_obj_add_event_cb()` for event handling
-- **User Data**: Store C++ object pointers via `lv_obj_set_user_data()`
-- **Thread Safety**: LVGL calls must be from UI task or use locks
-- **Styling**: Prefer consistent style approaches, consider reusable style functions
+### ⚠️ CRITICAL: Layered State Management
+**State lives at APPLICATION LAYER, NOT in UI!**
 
-### Error Handling
-- **Return Types**: Use `esp_err_t` for ESP-IDF style functions
-- **Exceptions**: Generally avoid exceptions in embedded, use return codes
-- **Validation**: Check parameters, especially at API boundaries
-- **Recovery**: Design for graceful degradation on errors
-- **Logging**: Always log errors with context
+```
+Application Layer (main_screen_wrapper.cpp)
+  ├─> WiThrottleClient (singleton)
+  ├─> JmriJsonClient (singleton)  
+  └─> ThrottleController (singleton) ← OWNS ALL STATE
+       └─> Models (Throttle, Knob, Locomotive)
 
-### Comments & Documentation
-- **Header Comments**: Explain class purpose and responsibilities
-  ```cpp
-  /**
-   * @brief Manages a single throttle instance including loco assignment,
-   *        speed control, and knob assignment.
-   */
-  class Throttle {
-  ```
-- **Method Comments**: Document complex logic, not obvious code
-- **Inline Comments**: Explain "why", not "what"
-- **TODO Comments**: Format as `// TODO: Description` for tracking
-
-## Architectural Patterns
-
-### Separation of Concerns
-- **Model**: Pure data and state (no UI, no I/O)
-- **Controller**: Business logic, coordinates between layers
-- **View**: UI presentation only, minimal logic
-- **HAL**: Hardware abstraction, no business logic
-
-### Event-Driven Design
-- Use callbacks for asynchronous events (encoder rotation, network messages)
-- Event structures for passing data
-- Consider event queue for complex scenarios
-
-### State Machines
-- Use enums for states
-- Clear transition functions
-- Document state diagrams in comments for complex flows
-
-## Testing & Development
-
-### Test Screens
-- Create separate test functions like `test_throttle_screen()`
-- Keep test code separate from production code
-- Use for visual and functional testing during development
-
-### Debug Features
-- Add temporary borders/colors for layout debugging (as we just did)
-- Include debug logging that can be disabled for production
-- Create test modes for hardware testing
-
-### Incremental Development
-- Build one feature at a time
-- Test each component independently before integration
-- Keep main branch working, use branches for major features
-
-## Project-Specific Guidelines
-
-### Throttle System
-- **4 Throttles**: Always arrays of size 4, use constants not magic numbers
-- **2 Knobs**: Manage assignment carefully, only one throttle per knob
-- **State Machine**: Unallocated → Selecting → Allocated → Released
-- **Touch Interaction**: Remember throttles are selected by touch for detail view
-
-### WiThrottle Protocol
-- **Async Communication**: Don't block UI on network operations
-- **State Sync**: Remote updates must reflect in UI immediately
-- **Heartbeat**: Maintain connection with regular heartbeats
-- **Error Recovery**: Handle disconnects gracefully
-
-### UI Responsiveness
-- **No Blocking**: Network and I2C operations must not block UI
-- **Immediate Feedback**: Touch actions should have instant visual response
-- **Background Updates**: State changes update UI from tasks
-
-### Memory Management
-- **Limited RAM**: ESP32-S3 has constraints, be efficient
-- **LVGL Buffers**: Already configured, don't change casually
-- **String Handling**: Be careful with dynamic strings, consider fixed buffers
-- **Roster Size**: May need to limit number of locos
-
-## Communication Patterns
-
-### Between Tasks
-- Use queues for passing data between tasks
-- Use event groups for synchronization
-- Protect shared data with mutexes
-
-### Callbacks
-```cpp
-// Encoder callback example
-typedef void (*EncoderCallback)(int position, int delta);
-
-class RotaryEncoder {
-    void setCallback(EncoderCallback cb) { m_callback = cb; }
-private:
-    EncoderCallback m_callback;
-};
+UI Layer (MainScreen)
+  └─> Raw pointers only, NEVER owns state
 ```
 
-### Observer Pattern
-Consider observer pattern for state changes that multiple components need to know about:
+**Pattern:**
 ```cpp
-class ThrottleObserver {
-public:
-    virtual void onSpeedChanged(int throttleId, int speed) = 0;
-    virtual void onLocoAssigned(int throttleId, const Locomotive& loco) = 0;
+// Application layer - owns state
+static ThrottleController* g_throttleController = nullptr;
+
+// UI layer - just references
+class MainScreen {
+    ThrottleController* m_throttleController;  // Not owned!
 };
+
+// UI can be deleted/recreated without state loss
+delete g_mainScreen;
+g_mainScreen = new MainScreen();
+g_mainScreen->create(..., g_throttleController);
 ```
+
+### ⚠️ CRITICAL: LVGL Thread Safety
+**LVGL is NOT thread-safe!** Lock before UI access from network tasks:
+
+```cpp
+// From WiThrottle/network task:
+void callback() {
+    if (lvgl_port_lock(100)) {  // 100ms timeout
+        lv_label_set_text(label, "Update");
+        lvgl_port_unlock();
+    }
+}
+```
+
+**When locks required:**
+- ✅ Network tasks (WiThrottle, MQTT, WebSocket)
+- ✅ FreeRTOS timers
+- ✅ Hardware interrupts
+- ❌ LVGL event callbacks (already on UI task)
+
+**Timeouts:**
+- 100ms: Frequent updates (can skip if busy)
+- -1: Critical updates (must succeed)
+
+## ESP-IDF Specifics
+- **Logging**: ESP_LOG macros with `static const char* TAG`
+- **Tasks**: `xTaskCreate()` with appropriate stack sizes
+- **Memory**: Mind stack limits, use heap judiciously
+- **Drivers**: Use ESP-IDF APIs, not direct register access
+
+## Project Specifics
+- **4 Throttles, 2 Knobs**: Use constants, not magic numbers
+- **State Machines**: Document with enums and comments
+- **WiThrottle**: Async, don't block UI
+- **UI Responsiveness**: Immediate visual feedback, no blocking
+
+## Development
+- Ask if requirements unclear
+- Test incrementally
+- Document architecture changes
+- Be honest about uncertainties
+- Point out code quality issues
+
+Current Phase: Core functionality complete, testing with virtual encoders.
+
 
 ## Working with Me (AI Assistant)
 

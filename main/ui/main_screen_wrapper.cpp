@@ -2,6 +2,7 @@
 #include "MainScreen.h"
 #include "../communication/WiThrottleClient.h"
 #include "../communication/JmriJsonClient.h"
+#include "../controller/ThrottleController.h"
 
 // Global main screen instance
 static MainScreen* g_mainScreen = nullptr;
@@ -12,11 +13,11 @@ static WiThrottleClient* g_wiThrottleClient = nullptr;
 // Global JMRI JSON client instance
 static JmriJsonClient* g_jmriClient = nullptr;
 
+// Global throttle controller instance (application layer, independent of UI)
+static ThrottleController* g_throttleController = nullptr;
+
 void show_main_screen(void)
 {
-    // Don't delete old screen here - let LVGL handle it
-    // The screen objects will be cleaned up when new screen loads
-    
     // Create WiThrottle client if not already created
     if (g_wiThrottleClient == nullptr) {
         g_wiThrottleClient = new WiThrottleClient();
@@ -35,9 +36,19 @@ void show_main_screen(void)
         // g_jmriClient->connect("192.168.1.100", 12080);
     }
     
-    // Create new main screen (old one will be deleted by LVGL when screen changes)
+    // Create throttle controller if not already created (application layer - persists across UI changes)
+    if (g_throttleController == nullptr) {
+        g_throttleController = new ThrottleController(g_wiThrottleClient);
+        g_throttleController->initialize();
+    }
+    
+    // Create or recreate main screen (UI can be destroyed/recreated without losing state)
+    if (g_mainScreen != nullptr) {
+        delete g_mainScreen;  // Safe to delete UI now that state is in controller
+    }
+    
     g_mainScreen = new MainScreen();
-    g_mainScreen->create(g_wiThrottleClient, g_jmriClient);
+    g_mainScreen->create(g_wiThrottleClient, g_jmriClient, g_throttleController);
 }
 
 extern "C" JmriJsonClient* get_jmri_client(void)

@@ -11,6 +11,10 @@ idf_component_register(
         "model/Locomotive.cpp"
         "model/Throttle.cpp"
         "model/Roster.cpp"
+        "model/Knob.cpp"
+        
+        # Controller layer (C++)
+        "controller/ThrottleController.cpp"
         
         # Communication layer (C++)
         "communication/WiFiManager.cpp"
@@ -19,6 +23,7 @@ idf_component_register(
         
         # UI layer (C++)
         "ui/ThrottleMeter.cpp"
+        "ui/VirtualEncoderPanel.cpp"
         "ui/WiFiConfigScreen.cpp"
         "ui/wifi_config_wrapper.cpp"
         "ui/JmriConfigScreen.cpp"

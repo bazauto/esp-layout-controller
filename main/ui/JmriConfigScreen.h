@@ -69,6 +69,7 @@ private:
     lv_obj_t* m_serverIpInput;
     lv_obj_t* m_wiThrottlePortInput;
     lv_obj_t* m_powerManagerInput;
+    lv_obj_t* m_speedStepsInput;
     lv_obj_t* m_connectButton;
     lv_obj_t* m_disconnectButton;
     lv_obj_t* m_backButton;

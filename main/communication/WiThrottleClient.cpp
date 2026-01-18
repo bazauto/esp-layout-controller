@@ -309,6 +309,58 @@ esp_err_t WiThrottleClient::setFunction(char throttleId, int function, bool stat
     return sendCommand(command);
 }
 
+esp_err_t WiThrottleClient::querySpeed(char throttleId)
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Check if throttle has an acquired loco
+    auto it = m_throttleStates.find(throttleId);
+    if (it == m_throttleStates.end() || !it->second.acquired) {
+        ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // WiThrottle protocol: M<throttleId>A<addressType><address><;>qV
+    // Response will be: M<throttleId>A<addressType><address><;>V<speed>
+    const auto& throttleState = it->second;
+    std::string command = "M" + std::string(1, throttleId) + 
+                         "A" + std::string(1, throttleState.addressType) + std::to_string(throttleState.address) +
+                         "<;>qV";
+    
+    ESP_LOGD(TAG, "Querying throttle %c speed", throttleId);
+    
+    return sendCommand(command);
+}
+
+esp_err_t WiThrottleClient::queryDirection(char throttleId)
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Check if throttle has an acquired loco
+    auto it = m_throttleStates.find(throttleId);
+    if (it == m_throttleStates.end() || !it->second.acquired) {
+        ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // WiThrottle protocol: M<throttleId>A<addressType><address><;>qR
+    // Response will be: M<throttleId>A<addressType><address><;>R<direction>
+    const auto& throttleState = it->second;
+    std::string command = "M" + std::string(1, throttleId) + 
+                         "A" + std::string(1, throttleState.addressType) + std::to_string(throttleState.address) +
+                         "<;>qR";
+    
+    ESP_LOGD(TAG, "Querying throttle %c direction", throttleId);
+    
+    return sendCommand(command);
+}
+
 void WiThrottleClient::sendHeartbeat()
 {
     if (isConnected()) {
@@ -365,7 +417,7 @@ void WiThrottleClient::receiveTask(void* arg)
 void WiThrottleClient::processMessage(const std::string& message)
 {
     // Log at debug level for normal operation
-    ESP_LOGD(TAG, "RX: %s", message.c_str());
+    ESP_LOGI(TAG, "RX: %s", message.c_str());
     
     if (message.empty()) {
         return;
@@ -415,8 +467,12 @@ void WiThrottleClient::processMessage(const std::string& message)
             sendHeartbeat();
             break;
             
+        case 'M':  // Multi-throttle (throttle state changes)
+            handleThrottleMessage(message);
+            break;
+            
         default:
-            ESP_LOGD(TAG, "Unhandled message type: %c", msgType);
+            ESP_LOGW(TAG, "Unhandled message type: %c", msgType);
             break;
     }
 }
@@ -582,5 +638,98 @@ void WiThrottleClient::handleRosterMessage(const std::string& message)
     // Notify callback
     if (m_rosterCallback) {
         m_rosterCallback(m_roster);
+    }
+}
+
+void WiThrottleClient::handleThrottleMessage(const std::string& message)
+{
+    // Multi-throttle message format: M<throttleId><command><data>
+    // Examples:
+    //   M0AS3<;>V50     - Throttle 0, Action, address S3, speed 50
+    //   M0AS3<;>R1      - Throttle 0, Action, address S3, direction forward
+    //   M0AS3<;>F15     - Throttle 0, Action, address S3, function 1 on
+
+    if (message.length() < 3) {
+        ESP_LOGW(TAG, "Throttle message too short: %s", message.c_str());
+        return;
+    }
+    
+    char throttleId = message[1];  // '0', '1', '2', '3'
+    char command = message[2];     // 'A' = action, '+' = add, '-' = remove, 'L' = labels
+    
+    // We only care about 'A' (action) messages for state updates
+    if (command != 'A') {
+        ESP_LOGD(TAG, "Ignoring non-action throttle message: %s", message.c_str());
+        return;
+    }
+    
+    // Find the <;> delimiter that separates address from data
+    size_t delimPos = message.find("<;>");
+    if (delimPos == std::string::npos) {
+        ESP_LOGW(TAG, "Throttle message missing delimiter: %s", message.c_str());
+        return;
+    }
+    
+    // Extract address (e.g., "S3" or "L41")
+    std::string addressPart = message.substr(3, delimPos - 3);
+    if (addressPart.length() < 2) {
+        ESP_LOGW(TAG, "Throttle message invalid address: %s", message.c_str());
+        return;
+    }
+    
+    int address = std::atoi(addressPart.substr(1).c_str());
+    
+    // Extract command data after delimiter
+    std::string data = message.substr(delimPos + 3);
+    if (data.empty()) {
+        ESP_LOGW(TAG, "Throttle message missing data: %s", message.c_str());
+        return;
+    }
+    
+    // Parse the data command
+    char dataType = data[0];  // 'V' = speed, 'R' = direction, 'F' = function
+    
+    ThrottleUpdate update;
+    update.throttleId = throttleId;
+    update.address = address;
+    update.speed = -1;
+    update.direction = -1;
+    update.function = -1;
+    update.functionState = false;
+    
+    switch (dataType) {
+        case 'V':  // Speed
+            if (data.length() > 1) {
+                update.speed = std::atoi(data.substr(1).c_str());
+                ESP_LOGD(TAG, "Throttle %c speed: %d", throttleId, update.speed);
+            }
+            break;
+            
+        case 'R':  // Direction
+            if (data.length() > 1) {
+                update.direction = (data[1] == '1') ? 1 : 0;
+                ESP_LOGD(TAG, "Throttle %c direction: %s", throttleId, update.direction ? "forward" : "reverse");
+            }
+            break;
+            
+        case 'F':  // Function
+            if (data.length() > 2) {
+                // Format: F<number><state>  e.g., F00, F15, F11
+                int funcNum = std::atoi(data.substr(1, 2).c_str());
+                bool funcState = (data[data.length() - 1] == '1');
+                update.function = funcNum;
+                update.functionState = funcState;
+                ESP_LOGD(TAG, "Throttle %c function %d: %s", throttleId, funcNum, funcState ? "on" : "off");
+            }
+            break;
+            
+        default:
+            ESP_LOGD(TAG, "Unknown throttle data type: %c in %s", dataType, message.c_str());
+            return;
+    }
+    
+    // Notify callback
+    if (m_throttleCallback) {
+        m_throttleCallback(update);
     }
 }

@@ -7,12 +7,21 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     , m_needle(nullptr)
     , m_valueLabel(nullptr)
     , m_unitLabel(nullptr)
-    , m_min(10)
-    , m_max(60)
-    , m_value(10)
+    , m_locoLabel(nullptr)
+    , m_functionsButton(nullptr)
+    , m_releaseButton(nullptr)
+    , m_min(0)
+    , m_max(126)
+    , m_value(0)
     , m_scale(scale > 0 ? scale : 1.0f)
     , m_animRunning(false)
+    , m_assignedKnob(-1)
+    , m_userData(nullptr)
 {
+    m_knobIndicators[0] = nullptr;
+    m_knobIndicators[1] = nullptr;
+    m_knobAvailable[0] = true;
+    m_knobAvailable[1] = true;
     // Create container
     m_container = lv_obj_create(parent);
     lv_obj_remove_style_all(m_container);
@@ -83,11 +92,21 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     
     // Value label
     m_valueLabel = lv_label_create(m_meter);
-    lv_label_set_text(m_valueLabel, "-");
+    lv_label_set_text(m_valueLabel, "0");
     
-    // Unit label
+    // Unit label  
     m_unitLabel = lv_label_create(m_meter);
-    lv_label_set_text(m_unitLabel, "Mbps");
+    lv_label_set_text(m_unitLabel, "");
+    
+    // Create additional UI elements
+    createKnobIndicators();
+    createButtons();
+    
+    // Loco label (below meter)
+    m_locoLabel = lv_label_create(m_container);
+    lv_label_set_text(m_locoLabel, "");
+    lv_obj_set_style_text_align(m_locoLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(m_locoLabel, LV_PCT(100));
     
     // Apply initial settings
     setScale(m_scale);
@@ -206,5 +225,126 @@ void ThrottleMeter::animationCallback(void* var, int32_t value)
     
     if (tm->m_valueLabel) {
         lv_label_set_text_fmt(tm->m_valueLabel, "%" LV_PRId32, value);
+    }
+}
+
+void ThrottleMeter::createKnobIndicators()
+{
+    // Create L and R indicators at the bottom corners of the meter
+    const char* labels[2] = {"L", "R"};
+    
+    for (int i = 0; i < 2; i++) {
+        m_knobIndicators[i] = lv_btn_create(m_meter);
+        lv_obj_set_size(m_knobIndicators[i], 40, 30);
+        lv_obj_align(m_knobIndicators[i], i == 0 ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, i == 0 ? 5 : -5, -5);
+        
+        lv_obj_t* label = lv_label_create(m_knobIndicators[i]);
+        lv_label_set_text(label, labels[i]);
+        lv_obj_center(label);
+        
+        // Store knob ID in user data
+        lv_obj_set_user_data(m_knobIndicators[i], (void*)(intptr_t)i);
+    }
+    
+    updateKnobIndicators();
+}
+
+void ThrottleMeter::createButtons()
+{
+    // Create functions and release buttons (initially hidden)
+    m_functionsButton = lv_btn_create(m_container);
+    lv_obj_set_size(m_functionsButton, LV_PCT(45), 35);
+    lv_obj_add_flag(m_functionsButton, LV_OBJ_FLAG_HIDDEN);
+    
+    lv_obj_t* funcLabel = lv_label_create(m_functionsButton);
+    lv_label_set_text(funcLabel, "Functions");
+    lv_obj_center(funcLabel);
+    
+    m_releaseButton = lv_btn_create(m_container);
+    lv_obj_set_size(m_releaseButton, LV_PCT(45), 35);
+    lv_obj_add_flag(m_releaseButton, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(m_releaseButton, lv_palette_main(LV_PALETTE_RED), 0);
+    
+    lv_obj_t* releaseLabel = lv_label_create(m_releaseButton);
+    lv_label_set_text(releaseLabel, "Release");
+    lv_obj_center(releaseLabel);
+}
+
+void ThrottleMeter::updateKnobIndicators()
+{
+    for (int i = 0; i < 2; i++) {
+        if (!m_knobIndicators[i]) continue;
+        
+        if (m_assignedKnob == i) {
+            // Active knob - highlight
+            lv_obj_set_style_bg_color(m_knobIndicators[i], lv_palette_main(LV_PALETTE_GREEN), 0);
+            lv_obj_clear_state(m_knobIndicators[i], LV_STATE_DISABLED);
+        } else if (!m_knobAvailable[i]) {
+            // Unavailable (other knob is active) - gray out
+            lv_obj_set_style_bg_color(m_knobIndicators[i], lv_palette_main(LV_PALETTE_GREY), 0);
+            lv_obj_add_state(m_knobIndicators[i], LV_STATE_DISABLED);
+        } else {
+            // Available - normal button color
+            lv_obj_set_style_bg_color(m_knobIndicators[i], lv_palette_main(LV_PALETTE_BLUE), 0);
+            lv_obj_clear_state(m_knobIndicators[i], LV_STATE_DISABLED);
+        }
+    }
+}
+
+void ThrottleMeter::setLocomotive(const char* name, int address)
+{
+    char buf[64];
+    lv_snprintf(buf, sizeof(buf), "%s (#%d)", name, address);
+    lv_label_set_text(m_locoLabel, buf);
+    
+    // Show buttons when loco is assigned
+    lv_obj_clear_flag(m_functionsButton, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(m_releaseButton, LV_OBJ_FLAG_HIDDEN);
+}
+
+void ThrottleMeter::clearLocomotive()
+{
+    lv_label_set_text(m_locoLabel, "");
+    
+    // Hide buttons when no loco
+    lv_obj_add_flag(m_functionsButton, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(m_releaseButton, LV_OBJ_FLAG_HIDDEN);
+}
+
+void ThrottleMeter::setAssignedKnob(int knobId)
+{
+    m_assignedKnob = knobId;
+    updateKnobIndicators();
+}
+
+void ThrottleMeter::setKnobAvailable(int knobId, bool available)
+{
+    if (knobId >= 0 && knobId < 2) {
+        m_knobAvailable[knobId] = available;
+        updateKnobIndicators();
+    }
+}
+
+void ThrottleMeter::setKnobTouchCallback(lv_event_cb_t callback, void* userData)
+{
+    m_userData = userData;
+    for (int i = 0; i < 2; i++) {
+        if (m_knobIndicators[i]) {
+            lv_obj_add_event_cb(m_knobIndicators[i], callback, LV_EVENT_CLICKED, userData);
+        }
+    }
+}
+
+void ThrottleMeter::setFunctionsCallback(lv_event_cb_t callback, void* userData)
+{
+    if (m_functionsButton) {
+        lv_obj_add_event_cb(m_functionsButton, callback, LV_EVENT_CLICKED, userData);
+    }
+}
+
+void ThrottleMeter::setReleaseCallback(lv_event_cb_t callback, void* userData)
+{
+    if (m_releaseButton) {
+        lv_obj_add_event_cb(m_releaseButton, callback, LV_EVENT_CLICKED, userData);
     }
 }

@@ -1,33 +1,37 @@
 # ESP Layout Controller - Project Overview
 
-## Current Status (Phase 1 → Phase 2 Transition)
+## Documentation
+- **This file**: High-level project overview and architecture
+- **[THROTTLE_UI_IMPLEMENTATION_PLAN.md](./THROTTLE_UI_IMPLEMENTATION_PLAN.md)**: Implementation phases and state machines
+- **[WITHROTTLE_PROTOCOL.md](./WITHROTTLE_PROTOCOL.md)**: WiThrottle protocol reference
+
+## Current Status: Phases 1, 2, 4, 6 Complete!
 ✅ **Completed:**
-- Basic LVGL UI framework operational
-- 4 throttle meters displaying in 2x2 grid
-- WiThrottle protocol research complete (see WITHROTTLE_PROTOCOL.md)
-- Project planning and documentation
-- I2C address conflict resolved (LTC4316 translator solution)
+- **Architecture**: Layered design with application-layer state management
+- **UI**: 4 throttle meters, virtual encoder panel, settings screens
+- **State Management**: Throttle & knob state machines fully implemented
+- **WiThrottle Integration**: Protocol client with speed/direction/function control
+- **Networking**: WiFi config, JMRI JSON API, track power control
+- **Thread Safety**: LVGL mutex protection for multi-core safety
+- **Configuration**: Configurable speed steps per knob click (NVS storage)
 
 🔄 **In Progress:**
-- C++ migration and directory structure setup
-- Awaiting rotary encoder hardware (LTC4316 translators on order)
+- Testing speed control with periodic state polling (JMRI quirks workaround)
+- Roster selection overlay (Phase 3)
 
 ⏭️ **Next Steps:**
-1. Create C++ directory structure
-2. Migrate existing code to C++
-3. Implement WiFi connection management
-4. Begin WiThrottle client implementation
-5. Test with encoders when hardware arrives
+- Function panel implementation (Phase 5)
+- Hardware encoder integration when available (Phase 7)
+
+**See [THROTTLE_UI_IMPLEMENTATION_PLAN.md](./THROTTLE_UI_IMPLEMENTATION_PLAN.md) for detailed phase breakdown.**
 
 ## Project Goal
-Create a 7" touchscreen control interface for a model railway layout, capable of controlling up to 4 locomotives simultaneously using the WiThrottle protocol.
+7" touchscreen interface for model railway control: 4 simultaneous locomotives via WiThrottle protocol.
 
-## Hardware Components
-- **Display**: 7" touchscreen (currently configured, uses I2C 0x36-0x3D)
-- **Microcontroller**: ESP32-S3
-- **Input Devices**: 2x Adafruit I2C QT Rotary Encoders with push buttons
-  - **I2C Addresses**: 0x76 and 0x77 (via LTC4316 address translator)
-  - **Address Translation**: Using Adafruit LTC4316 I2C Address Translator
+## Hardware
+- **Display**: 7" RGB touchscreen (I2C 0x36-0x3D)
+- **MCU**: ESP32-S3 (dual-core, 8MB flash)
+- **Input**: 2x Adafruit I2C rotary encoders (0x76, 0x77 via LTC4316 translator)
     - Translates encoder base addresses (0x36, 0x37) by XOR 0x40
     - Final addresses: 0x76 (encoder 1), 0x77 (encoder 2)
   - **STATUS**: ✅ Solution identified, hardware on order
@@ -97,6 +101,44 @@ Create a 7" touchscreen control interface for a model railway layout, capable of
 
 ### Key Software Components Needed
 
+#### 0. Application Layer (State Management)
+**Location**: `main/ui/main_screen_wrapper.cpp`
+
+**Purpose**: Owns and manages all application state independently of UI lifecycle.
+
+**Singletons (persist across UI changes):**
+- **WiThrottleClient**: Network communication with JMRI
+- **JmriJsonClient**: JSON API for track power control
+- **ThrottleController**: Application state coordinator
+  - Owns 4 Throttle instances
+  - Owns 2 Knob instances
+  - Manages all knob-to-throttle assignments
+  - Coordinates between network layer and UI layer
+
+**Key Pattern**:
+```cpp
+// Application layer owns state
+static ThrottleController* g_throttleController = nullptr;
+
+void show_main_screen(void) {
+    // Create controller once (survives screen switches)
+    if (g_throttleController == nullptr) {
+        g_throttleController = new ThrottleController(...);
+    }
+    
+    // Recreate UI as needed (state preserved)
+    delete g_mainScreen;
+    g_mainScreen = new MainScreen();
+    g_mainScreen->create(..., g_throttleController);  // Pass reference
+}
+```
+
+**Benefits**:
+- Navigating to/from settings preserves throttle state
+- Knob assignments survive across screens
+- Loco selections and speeds are never lost
+- Clean separation between state and presentation
+
 #### 1. Hardware Abstraction Layer
 - **RotaryEncoder Class**: I2C rotary encoder interface
   - Position tracking
@@ -147,27 +189,61 @@ Create a 7" touchscreen control interface for a model railway layout, capable of
   - Allocation state
   - Direction
 
+- **Knob Class**: Physical encoder state
+  - Current state (IDLE, SELECTING, CONTROLLING)
+  - Assigned throttle ID
+  - Roster index (during selection)
+
 - **SignalState Class**: Cab signal information
   - Signal aspect (clear/approach/danger)
   - Associated throttle/loco
 
-#### 4. Controller Layer
-- **ThrottleController Class**: Orchestrates throttle operations
-  - Manages 4 throttle instances
-  - Handles knob assignments
-  - Routes encoder input to active throttles
-  - Synchronizes with WiThrottle updates
-  - State machine for selection vs control modes
+#### 4. Controller Layer (Application State Management)
+**⚠️ CRITICAL**: Controllers live at **application layer**, not UI layer!
+
+- **ThrottleController Class**: Application state coordinator (singleton)
+  - **Owned by**: `main_screen_wrapper.cpp` (survives screen changes)
+  - **Ownership**: Owns 4 Throttle instances, 2 Knob instances
+  - **Responsibilities**:
+    - Manages all knob-to-throttle assignments
+    - Routes encoder input to active throttles
+    - Synchronizes with WiThrottle network updates
+    - Implements state machines (throttle allocation, knob states)
+    - Coordinates between network layer and UI layer
+  - **Lifetime**: Created once, persists for application lifetime
+  - **UI Relationship**: UI receives raw pointer reference (doesn't own)
 
 - **LayoutController Class**: Layout-wide operations
   - Track power control
   - System state management
 
-#### 5. UI Layer
-- **ThrottleView Class**: Visual throttle meter (existing component)
+**Design Pattern**: UI is disposable, state is persistent
+```cpp
+// State persists in application layer
+ThrottleController* controller = getApplicationController();
+
+// UI just displays state
+MainScreen* ui = new MainScreen();
+ui->create(..., controller);  // Pass reference
+
+// UI can be deleted/recreated without state loss
+delete ui;  // Safe! Controller still has all state
+```
+
+#### 5. UI Layer (Presentation Only)
+**⚠️ CRITICAL**: UI should NOT own application state!
+
+- **MainScreen Class**: Main application screen
+  - **Ownership**: Stores raw pointers to controllers (doesn't own them)
+  - **Responsibilities**: Pure presentation and event routing
+  - **Lifetime**: Can be destroyed/recreated freely
+  - **State Access**: Via controller references only
+
+- **ThrottleMeter Class**: Visual throttle meter component
   - LVGL-based display
   - Touch event handling
   - State visualization
+  - Queries ThrottleController for current state
 
 - **ThrottleDetailPanel Class**: Right-side detail view
   - Function button grid
@@ -188,16 +264,66 @@ Create a 7" touchscreen control interface for a model railway layout, capable of
   - Connection status (WiFi, JMRI, MQTT)
   - System mode
 
+#### 7. Threading & Concurrency ⚠️ CRITICAL
+**Multi-core architecture requires careful thread safety:**
+
+```
+Core 0: Network Tasks           Core 1: UI Task
+  ├─ WiThrottle RX Task    →    ├─ LVGL Rendering
+  ├─ MQTT Task              →    └─ LVGL Event Handling
+  └─ WebSocket Task         →
+```
+
+**⚠️ LVGL is NOT thread-safe!** All UI updates from network tasks must use mutex protection:
+
+```cpp
+// CORRECT - Lock LVGL mutex before UI access
+void onNetworkCallback(void* userData) {
+    if (lvgl_port_lock(100)) {      // Acquire LVGL mutex
+        updateUI();                  // Safe to call LVGL functions
+        lvgl_port_unlock();          // Release mutex
+    } else {
+        ESP_LOGW(TAG, "Failed to acquire LVGL lock");
+    }
+}
+```
+
+**When locks are required:**
+- ✅ Always from network receive tasks (WiThrottle, MQTT, WebSocket)
+- ✅ Always from FreeRTOS timers
+- ✅ Always from hardware interrupt handlers
+- ❌ Never needed within LVGL event callbacks (already on UI task)
+
+**Timeout guidelines:**
+- **100ms**: Frequent, non-critical updates (speed changes)
+- **-1 (infinite)**: Important, infrequent updates (power/connection status)
+
 ## Implementation Phases
 
-### Phase 1: Foundation & Migration ✓ (Partially Complete)
+### Phase 1: Foundation & Migration ✅ **COMPLETE**
 - [x] Basic LVGL UI structure
-- [x] Throttle meter display
-- [ ] Migrate to C++
-- [ ] Create base class structure
-- [ ] Setup project organization
+- [x] Throttle meter display with enhanced features
+- [x] Migrate to C++
+- [x] Create base class structure
+- [x] Setup project organization
+- [x] Model classes: Locomotive, Throttle, Knob, Roster
+- [x] Controller classes: ThrottleController
+- [x] UI event handlers wired up
 
-### Phase 2: Hardware Integration
+### Phase 2: Core Throttle Logic & UI ✅ **COMPLETE**
+- [x] Throttle state machine (UNALLOCATED → ALLOCATED_WITH_KNOB → ALLOCATED_NO_KNOB)
+- [x] Knob state machine (IDLE → SELECTING → CONTROLLING)
+- [x] Knob assignment logic (touch indicators to assign)
+- [x] Dynamic knob reassignment between throttles
+- [x] ThrottleMeter UI enhancements (indicators, buttons, loco display)
+- [x] Event handlers for knob indicators, functions, release
+- [x] ThrottleController coordination layer
+- [x] UI update callbacks
+- [x] Locomotive model with roster compatibility
+- [ ] Virtual encoder testing UI (buttons to simulate rotation/press) **← NEXT**
+- [ ] Test complete throttle selection flow
+
+### Phase 3: Hardware Integration
 - [ ] Research Adafruit I2C QT Rotary Encoder library/datasheet
 - [ ] I2C rotary encoder driver implementation (addresses 0x76, 0x77)
 - [ ] Encoder input handling with callbacks
@@ -205,7 +331,7 @@ Create a 7" touchscreen control interface for a model railway layout, capable of
 - [ ] Hardware testing utilities
 - [ ] ⏳ **BLOCKED**: Waiting for LTC4316 address translator hardware
 
-### Phase 3: WiThrottle Protocol
+### Phase 4: WiThrottle Protocol
 - [x] Research WiThrottle protocol specification (see WITHROTTLE_PROTOCOL.md)
 - [ ] Network connection management (WiFi)
 - [ ] WiThrottle protocol parser
@@ -216,24 +342,19 @@ Create a 7" touchscreen control interface for a model railway layout, capable of
 - [ ] Connection recovery/resilience
 - [ ] **CRITICAL**: Heartbeat implementation (prevent E-stop)
 
-### Phase 4: Core Throttle Functionality
+### Phase 5: UI Enhancement & Testing
 - [ ] Throttle state machine (unallocated → selecting → allocated)
-- [ ] Loco roster navigation
-- [ ] Knob assignment logic
-- [ ] Speed control implementation
-- [ ] Emergency stop
-- [ ] Multi-throttle coordination
-
-### Phase 5: UI Enhancement
-- [ ] Touch event handling
+### Phase 5: UI Enhancement & Testing
+- [x] Touch event handling (knob indicators, buttons)
 - [ ] Detail panel implementation
 - [ ] Function button generation from roster data
-- [ ] Visual feedback and animations
-- [ ] Knob assignment indicators
+- [x] Visual feedback for knob states
+- [x] Knob assignment indicators
 - [ ] Status displays
+- [ ] Complete integration testing with virtual encoders
 
 ### Phase 6: Layout Controls
-- [ ] Track power control
+- [x] Track power control (JMRI JSON API integrated)
 - [ ] WiFi configuration UI
 - [ ] Additional control buttons
 - [ ] System status indicators

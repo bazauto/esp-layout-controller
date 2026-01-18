@@ -25,10 +25,7 @@ MainScreen::MainScreen()
     , m_wiThrottleClient(nullptr)
     , m_jmriClient(nullptr)
 {
-    // Initialize throttles
-    for (int i = 0; i < 4; ++i) {
-        m_throttles[i] = Throttle(i);
-    }
+    // Throttles are now managed by ThrottleController
 }
 
 MainScreen::~MainScreen()
@@ -38,10 +35,16 @@ MainScreen::~MainScreen()
     // Our ThrottleMeter objects will be destroyed naturally with their parent containers
 }
 
-lv_obj_t* MainScreen::create(WiThrottleClient* wiThrottleClient, JmriJsonClient* jmriClient)
+lv_obj_t* MainScreen::create(WiThrottleClient* wiThrottleClient, JmriJsonClient* jmriClient, ThrottleController* throttleController)
 {
     m_wiThrottleClient = wiThrottleClient;
     m_jmriClient = jmriClient;
+    m_throttleController = throttleController;  // Store reference (not owned)
+    
+    // Register UI update callback with the controller
+    if (m_throttleController) {
+        m_throttleController->setUIUpdateCallback(onUIUpdateNeeded, this);
+    }
     
     // Create a new screen or clean the current one
     m_screen = lv_obj_create(nullptr);
@@ -58,6 +61,9 @@ lv_obj_t* MainScreen::create(WiThrottleClient* wiThrottleClient, JmriJsonClient*
     
     // Create settings button
     createSettingsButton();
+    
+    // Initial UI update
+    updateAllThrottles();
     
     ESP_LOGI(TAG, "Main screen created");
     
@@ -89,7 +95,7 @@ void MainScreen::createLeftPanel()
 
 void MainScreen::createRightPanel()
 {
-    // Right half - track power and test controls
+    // Right half - track power and virtual encoder
     m_rightPanel = lv_obj_create(lv_obj_get_parent(m_leftPanel));
     lv_obj_set_grid_cell(m_rightPanel, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
     lv_obj_set_flex_flow(m_rightPanel, LV_FLEX_FLOW_COLUMN);
@@ -100,84 +106,18 @@ void MainScreen::createRightPanel()
     // Add track power controls at the top
     createTrackPowerControls(m_rightPanel);
     
-    // Test Controls Section
-    lv_obj_t* testLabel = lv_label_create(m_rightPanel);
-    lv_label_set_text(testLabel, "WiThrottle Test Controls");
-    lv_obj_set_style_text_font(testLabel, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(testLabel, lv_color_hex(0x00AAFF), 0);
-    lv_obj_set_style_pad_top(testLabel, 20, 0);
+    // Divider
+    lv_obj_t* divider = lv_obj_create(m_rightPanel);
+    lv_obj_set_size(divider, LV_PCT(90), 2);
+    lv_obj_set_style_bg_color(divider, lv_palette_main(LV_PALETTE_GREY), 0);
+    lv_obj_set_style_border_width(divider, 0, 0);
     
-    // Info label
-    lv_obj_t* infoLabel = lv_label_create(m_rightPanel);
-    lv_label_set_text(infoLabel, "Controls first loco in roster on Throttle 'T'");
-    lv_obj_set_style_text_color(infoLabel, lv_color_hex(0x808080), 0);
-    
-    // Acquire button
-    lv_obj_t* acquireBtn = lv_btn_create(m_rightPanel);
-    lv_obj_set_size(acquireBtn, 250, 50);
-    lv_obj_add_event_cb(acquireBtn, onAcquireButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(acquireBtn, lv_color_hex(0x00AA00), 0);
-    lv_obj_t* acquireLabel = lv_label_create(acquireBtn);
-    lv_label_set_text(acquireLabel, "Acquire Loco");
-    lv_obj_center(acquireLabel);
-    
-    // Speed control buttons in a row
-    lv_obj_t* speedRow = lv_obj_create(m_rightPanel);
-    lv_obj_remove_style_all(speedRow);
-    lv_obj_set_size(speedRow, LV_PCT(100), 50);
-    lv_obj_set_flex_flow(speedRow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(speedRow, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    
-    // Speed buttons
-    const char* speedLabels[] = {"Stop", "Slow", "Med", "Fast"};
-    const int speeds[] = {0, 30, 60, 100};
-    for (int i = 0; i < 4; i++) {
-        lv_obj_t* speedBtn = lv_btn_create(speedRow);
-        lv_obj_set_size(speedBtn, 60, 50);
-        lv_obj_set_user_data(speedBtn, (void*)(intptr_t)speeds[i]);
-        lv_obj_add_event_cb(speedBtn, onSpeedButtonClicked, LV_EVENT_CLICKED, this);
-        lv_obj_t* label = lv_label_create(speedBtn);
-        lv_label_set_text(label, speedLabels[i]);
-        lv_obj_center(label);
-    }
-    
-    // Direction buttons in a row
-    lv_obj_t* dirRow = lv_obj_create(m_rightPanel);
-    lv_obj_remove_style_all(dirRow);
-    lv_obj_set_size(dirRow, LV_PCT(100), 50);
-    lv_obj_set_flex_flow(dirRow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(dirRow, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    
-    lv_obj_t* fwdBtn = lv_btn_create(dirRow);
-    lv_obj_set_size(fwdBtn, 120, 50);
-    lv_obj_add_event_cb(fwdBtn, onForwardButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_t* fwdLabel = lv_label_create(fwdBtn);
-    lv_label_set_text(fwdLabel, "Forward");
-    lv_obj_center(fwdLabel);
-    
-    lv_obj_t* revBtn = lv_btn_create(dirRow);
-    lv_obj_set_size(revBtn, 120, 50);
-    lv_obj_add_event_cb(revBtn, onReverseButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_t* revLabel = lv_label_create(revBtn);
-    lv_label_set_text(revLabel, "Reverse");
-    lv_obj_center(revLabel);
-    
-    // Function F0 (lights) button
-    lv_obj_t* f0Btn = lv_btn_create(m_rightPanel);
-    lv_obj_set_size(f0Btn, 250, 50);
-    lv_obj_add_event_cb(f0Btn, onF0ButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_t* f0Label = lv_label_create(f0Btn);
-    lv_label_set_text(f0Label, "Toggle F0 (Lights)");
-    lv_obj_center(f0Label);
-    
-    // Release button
-    lv_obj_t* releaseBtn = lv_btn_create(m_rightPanel);
-    lv_obj_set_size(releaseBtn, 250, 50);
-    lv_obj_add_event_cb(releaseBtn, onReleaseButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(releaseBtn, lv_color_hex(0xAA0000), 0);
-    lv_obj_t* releaseLabel = lv_label_create(releaseBtn);
-    lv_label_set_text(releaseLabel, "Release Loco");
-    lv_obj_center(releaseLabel);
+    // Virtual encoder panel for testing
+    m_virtualEncoderPanel = std::make_unique<VirtualEncoderPanel>();
+    m_virtualEncoderPanel->create(m_rightPanel, 
+                                  onVirtualEncoderRotation,
+                                  onVirtualEncoderPress,
+                                  this);
 }
 
 void MainScreen::createThrottleMeters()
@@ -202,6 +142,14 @@ void MainScreen::createThrottleMeters()
             
             // Create C++ throttle meter with scale 0.9 to leave padding
             m_throttleMeters[meterIdx] = std::make_unique<ThrottleMeter>(cell, 0.9f);
+            
+            // Wire up callbacks (store throttleId in user data)
+            m_throttleMeters[meterIdx]->setKnobTouchCallback(onKnobIndicatorTouched, this);
+            m_throttleMeters[meterIdx]->setFunctionsCallback(onFunctionsButtonClicked, this);
+            m_throttleMeters[meterIdx]->setReleaseCallback(onReleaseButtonClicked, this);
+            
+            // Store throttle ID in the meter container's user data
+            lv_obj_set_user_data(m_throttleMeters[meterIdx]->getContainer(), (void*)(intptr_t)meterIdx);
             
             meterIdx++;
         }
@@ -252,9 +200,40 @@ void MainScreen::updateThrottle(int throttleId)
         return;
     }
     
-    // TODO: Update the throttle meter display with current throttle state
-    // This will be implemented when we connect the meters to the model
-    ESP_LOGD(TAG, "Update throttle %d", throttleId);
+    if (!m_throttleController || !m_throttleMeters[throttleId]) {
+        return;
+    }
+    
+    Throttle* throttle = m_throttleController->getThrottle(throttleId);
+    if (!throttle) return;
+    
+    ThrottleMeter* meter = m_throttleMeters[throttleId].get();
+    
+    // Update speed display
+    meter->setValue(throttle->getCurrentSpeed());
+    
+    // Update loco info
+    if (throttle->hasLocomotive()) {
+        Locomotive* loco = throttle->getLocomotive();
+        meter->setLocomotive(loco->getName().c_str(), loco->getAddress());
+    } else {
+        meter->clearLocomotive();
+    }
+    
+    // Update knob assignment indicators
+    int assignedKnob = throttle->getAssignedKnob();
+    meter->setAssignedKnob(assignedKnob);
+    
+    // Update knob availability (disable indicator if other knob is active)
+    if (assignedKnob >= 0) {
+        // One knob is assigned, disable the other
+        meter->setKnobAvailable(0, assignedKnob == 0);
+        meter->setKnobAvailable(1, assignedKnob == 1);
+    } else {
+        // No knob assigned, both available
+        meter->setKnobAvailable(0, true);
+        meter->setKnobAvailable(1, true);
+    }
 }
 
 void MainScreen::updateAllThrottles()
@@ -266,10 +245,8 @@ void MainScreen::updateAllThrottles()
 
 Throttle* MainScreen::getThrottle(int throttleId)
 {
-    if (throttleId < 0 || throttleId >= 4) {
-        return nullptr;
-    }
-    return &m_throttles[throttleId];
+    if (!m_throttleController) return nullptr;
+    return m_throttleController->getThrottle(throttleId);
 }
 
 void MainScreen::createTrackPowerControls(lv_obj_t* parent)
@@ -511,7 +488,7 @@ void MainScreen::onF0ButtonClicked(lv_event_t* e)
     screen->m_wiThrottleClient->setFunction('T', 0, f0State);
 }
 
-void MainScreen::onReleaseButtonClicked(lv_event_t* e)
+void MainScreen::onOldReleaseButtonClicked(lv_event_t* e)
 {
     MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
     
@@ -522,4 +499,118 @@ void MainScreen::onReleaseButtonClicked(lv_event_t* e)
     
     ESP_LOGI(TAG, "Releasing throttle T");
     screen->m_wiThrottleClient->releaseLocomotive('T');
+}
+
+void MainScreen::onKnobIndicatorTouched(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    if (!screen->m_throttleController) return;
+    
+    // Get the knob indicator button that was touched
+    lv_obj_t* indicator = lv_event_get_target(e);
+    int knobId = (int)(intptr_t)lv_obj_get_user_data(indicator);
+    
+    // Find the throttle meter container by walking up parent chain
+    lv_obj_t* current = indicator;
+    int throttleId = -1;
+    while (current) {
+        for (int i = 0; i < 4; i++) {
+            if (screen->m_throttleMeters[i] && current == screen->m_throttleMeters[i]->getContainer()) {
+                throttleId = i;
+                break;
+            }
+        }
+        if (throttleId >= 0) break;
+        current = lv_obj_get_parent(current);
+    }
+    
+    if (throttleId >= 0) {
+        ESP_LOGI(TAG, "Knob %d indicator touched on throttle %d", knobId, throttleId);
+        screen->m_throttleController->onKnobIndicatorTouched(throttleId, knobId);
+    }
+}
+
+void MainScreen::onFunctionsButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    if (!screen->m_throttleController) return;
+    
+    // Find the throttle meter container by walking up parent chain
+    lv_obj_t* button = lv_event_get_target(e);
+    lv_obj_t* current = button;
+    int throttleId = -1;
+    while (current) {
+        for (int i = 0; i < 4; i++) {
+            if (screen->m_throttleMeters[i] && current == screen->m_throttleMeters[i]->getContainer()) {
+                throttleId = i;
+                break;
+            }
+        }
+        if (throttleId >= 0) break;
+        current = lv_obj_get_parent(current);
+    }
+    
+    if (throttleId >= 0) {
+        ESP_LOGI(TAG, "Functions button clicked on throttle %d", throttleId);
+        screen->m_throttleController->onThrottleFunctions(throttleId);
+    }
+}
+
+void MainScreen::onReleaseButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    if (!screen->m_throttleController) return;
+    
+    // Find the throttle meter container by walking up parent chain
+    lv_obj_t* button = lv_event_get_target(e);
+    lv_obj_t* current = button;
+    int throttleId = -1;
+    while (current) {
+        for (int i = 0; i < 4; i++) {
+            if (screen->m_throttleMeters[i] && current == screen->m_throttleMeters[i]->getContainer()) {
+                throttleId = i;
+                break;
+            }
+        }
+        if (throttleId >= 0) break;
+        current = lv_obj_get_parent(current);
+    }
+    
+    if (throttleId >= 0) {
+        ESP_LOGI(TAG, "Release button clicked on throttle %d", throttleId);
+        screen->m_throttleController->onThrottleRelease(throttleId);
+    }
+}
+
+void MainScreen::onUIUpdateNeeded(void* userData)
+{
+    MainScreen* screen = static_cast<MainScreen*>(userData);
+    if (screen) {
+        // CRITICAL: Lock LVGL mutex before accessing LVGL objects
+        // This callback may be called from WiThrottle network task
+        if (lvgl_port_lock(100)) {
+            screen->updateAllThrottles();
+            lvgl_port_unlock();
+        } else {
+            ESP_LOGW(TAG, "Failed to acquire LVGL lock for UI update");
+        }
+    }
+}
+
+void MainScreen::onVirtualEncoderRotation(void* userData, int knobId, int delta)
+{
+    MainScreen* screen = static_cast<MainScreen*>(userData);
+    if (!screen->m_throttleController) return;
+    
+    ESP_LOGI(TAG, "Virtual encoder: knob %d rotated %+d", knobId, delta);
+    screen->m_throttleController->onKnobRotation(knobId, delta);
+}
+
+void MainScreen::onVirtualEncoderPress(void* userData, int knobId)
+{
+    MainScreen* screen = static_cast<MainScreen*>(userData);
+    if (!screen->m_throttleController) return;
+    
+    ESP_LOGI(TAG, "Virtual encoder: knob %d pressed", knobId);
+    screen->m_throttleController->onKnobPress(knobId);
 }

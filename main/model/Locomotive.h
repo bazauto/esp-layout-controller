@@ -41,9 +41,9 @@ public:
     Locomotive();
     Locomotive(const std::string& name, uint16_t address, AddressType addressType);
     
-    // Prevent copying (can add if needed later)
-    Locomotive(const Locomotive&) = delete;
-    Locomotive& operator=(const Locomotive&) = delete;
+    // Allow copying (needed for roster management)
+    Locomotive(const Locomotive& other) = default;
+    Locomotive& operator=(const Locomotive& other) = default;
     
     // Allow moving
     Locomotive(Locomotive&&) = default;
@@ -55,6 +55,7 @@ public:
     const std::string& getName() const { return m_name; }
     uint16_t getAddress() const { return m_address; }
     AddressType getAddressType() const { return m_addressType; }
+    bool isLongAddress() const { return m_addressType == AddressType::LONG; }
     uint8_t getSpeed() const { return m_speed; }
     Direction getDirection() const { return m_direction; }
     SpeedStepMode getSpeedStepMode() const { return m_speedStepMode; }
