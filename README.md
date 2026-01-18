@@ -78,6 +78,17 @@ The first time you run `idf.py` for the example will cost extra time as the buil
 
 (To exit the serial monitor, type ``Ctrl-]``.)
 
+### Run test builds (no menuconfig)
+
+The default build runs the UI. To run unit tests without changing `menuconfig`, use a separate build directory and a test-specific sdkconfig file:
+
+```powershell
+idf.py -B build-tests -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test.defaults" -D SDKCONFIG="build-tests/sdkconfig" test
+```
+
+Using a dedicated build directory avoids reusing the normal `sdkconfig` values. If you already ran tests once, delete `build-tests` to force a clean config.
+Ensure the serial monitor is closed so the flash step can access the COM port.
+
 See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
 
 ## Troubleshooting

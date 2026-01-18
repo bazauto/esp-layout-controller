@@ -219,6 +219,13 @@ void JmriJsonClient::sendHeartbeat()
     }
 }
 
+#if CONFIG_THROTTLE_TESTS
+void JmriJsonClient::testProcessMessage(const std::string& message)
+{
+    processMessage(message);
+}
+#endif
+
 void JmriJsonClient::websocketEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data)
 {
     JmriJsonClient* client = static_cast<JmriJsonClient*>(handler_args);

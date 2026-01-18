@@ -203,27 +203,28 @@ void MainScreen::updateThrottle(int throttleId)
     if (!m_throttleController || !m_throttleMeters[throttleId]) {
         return;
     }
-    
-    Throttle* throttle = m_throttleController->getThrottle(throttleId);
-    if (!throttle) return;
-    
+
+    ThrottleController::ThrottleSnapshot snapshot;
+    if (!m_throttleController->getThrottleSnapshot(throttleId, snapshot)) {
+        return;
+    }
+
     ThrottleMeter* meter = m_throttleMeters[throttleId].get();
-    
+
     // Update speed display
-    meter->setValue(throttle->getCurrentSpeed());
-    
+    meter->setValue(snapshot.currentSpeed);
+
     // Update loco info
-    if (throttle->hasLocomotive()) {
-        Locomotive* loco = throttle->getLocomotive();
-        meter->setLocomotive(loco->getName().c_str(), loco->getAddress());
+    if (snapshot.hasLocomotive) {
+        meter->setLocomotive(snapshot.locoName.c_str(), snapshot.locoAddress);
     } else {
         meter->clearLocomotive();
     }
-    
+
     // Update knob assignment indicators
-    int assignedKnob = throttle->getAssignedKnob();
+    int assignedKnob = snapshot.assignedKnob;
     meter->setAssignedKnob(assignedKnob);
-    
+
     // Update knob availability (disable indicator if other knob is active)
     if (assignedKnob >= 0) {
         // One knob is assigned, disable the other
@@ -414,13 +415,11 @@ void MainScreen::onAcquireButtonClicked(lv_event_t* e)
     }
     
     // Get first loco from roster
-    const auto& roster = screen->m_wiThrottleClient->getRoster();
-    if (roster.empty()) {
+    WiThrottleClient::Locomotive loco;
+    if (!screen->m_wiThrottleClient->getRosterEntry(0, loco)) {
         ESP_LOGW(TAG, "No locomotives in roster");
         return;
     }
-    
-    const auto& loco = roster[0];
     bool isLong = (loco.addressType == 'L');
     
     ESP_LOGI(TAG, "Acquiring loco: %s (addr=%d, type=%c)", 

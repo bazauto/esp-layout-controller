@@ -19,6 +19,8 @@
 # Build artifacts and directories
 **/build/
 build/
+**/build-tests/
+build-tests/
 *.o
 *.a
 *.out

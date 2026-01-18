@@ -5,6 +5,7 @@
 #include <functional>
 #include "esp_err.h"
 #include "esp_websocket_client.h"
+#include "sdkconfig.h"
 
 /**
  * @brief JMRI JSON Protocol Client
@@ -142,6 +143,13 @@ public:
      * @brief Stop heartbeat task
      */
     void stopHeartbeat();
+
+#if CONFIG_THROTTLE_TESTS
+    /**
+     * @brief Test-only hook to process a raw JSON message
+     */
+    void testProcessMessage(const std::string& message);
+#endif
 
 private:
     void processMessage(const std::string& message);

@@ -1,4 +1,4 @@
-menu "Example Configuration"
+menu "ESP-Layout-Controller Configuration"
 
     menu "Display"
         config EXAMPLE_LCD_RGB_BOUNCE_BUFFER_HEIGHT
@@ -113,5 +113,14 @@ menu "Example Configuration"
             default 100
             help
                 Height of LVGL buffer. The width of the buffer is the same as that of the LCD.
+    endmenu
+
+    menu "Testing"
+        config THROTTLE_TESTS
+            bool "Enable throttle/knob unit tests"
+            default n
+            help
+                Build and run Unity-based tests for the throttle/knob state machines
+                instead of launching the UI. Intended for on-device validation.
     endmenu
 endmenu

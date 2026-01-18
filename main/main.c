@@ -39,6 +39,14 @@ static void jmri_connect_task(void* arg)
     vTaskDelete(NULL);
 }
 
+#if CONFIG_THROTTLE_TESTS
+extern void run_throttle_tests(void);
+
+void app_main()
+{
+    run_throttle_tests();
+}
+#else
 void app_main()
 {
     // Initialize hardware
@@ -56,3 +64,4 @@ void app_main()
     // Start task to wait for WiFi then connect to JMRI
     xTaskCreate(jmri_connect_task, "jmri_connect", 4096, NULL, 5, NULL);
 }
+#endif

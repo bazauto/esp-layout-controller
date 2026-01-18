@@ -4,6 +4,8 @@
 #include "Throttle.h"
 #include "WiThrottleClient.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <memory>
 #include <vector>
 
@@ -21,12 +23,24 @@ class ThrottleController
 public:
     static constexpr int NUM_THROTTLES = 4;
     static constexpr int NUM_KNOBS = 2;
+
+    struct ThrottleSnapshot {
+        int throttleId;
+        Throttle::State state;
+        int assignedKnob;
+        int currentSpeed;
+        bool direction;
+        bool hasLocomotive;
+        std::string locoName;
+        int locoAddress;
+    };
     
     /**
      * @brief Constructor
      * @param wiThrottleClient WiThrottle client for network communication
      */
     explicit ThrottleController(WiThrottleClient* wiThrottleClient);
+    ~ThrottleController();
     
     /**
      * @brief Initialize controller
@@ -71,6 +85,12 @@ public:
      * @return Throttle pointer or nullptr
      */
     Throttle* getThrottle(int throttleId);
+
+    /**
+     * @brief Get a thread-safe snapshot of a throttle's state
+     * @return true if snapshot was captured
+     */
+    bool getThrottleSnapshot(int throttleId, ThrottleSnapshot& outSnapshot) const;
     
     /**
      * @brief Get knob model
@@ -87,7 +107,7 @@ public:
     /**
      * @brief Get loco at roster index
      */
-    const WiThrottleClient::Locomotive* getLocoAtRosterIndex(int index) const;
+    bool getLocoAtRosterIndex(int index, WiThrottleClient::Locomotive& outEntry) const;
     
     /**
      * @brief Set UI update callback
@@ -103,6 +123,9 @@ public:
     static int getSpeedStepsPerClick();
 
 private:
+    bool lockState(TickType_t timeout) const;
+    void unlockState() const;
+
     void updateUI();
     void sendSpeedCommand(int throttleId, int speed);
     std::unique_ptr<Locomotive> createLocomotiveFromRoster(const WiThrottleClient::Locomotive& rosterEntry);
@@ -120,6 +143,8 @@ private:
     WiThrottleClient* m_wiThrottleClient;
     std::vector<std::unique_ptr<Throttle>> m_throttles;
     std::vector<std::unique_ptr<Knob>> m_knobs;
+
+    mutable SemaphoreHandle_t m_stateMutex;
     
     void (*m_uiUpdateCallback)(void*);
     void* m_uiUpdateUserData;

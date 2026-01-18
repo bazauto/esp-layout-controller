@@ -1,36 +1,52 @@
+set(APP_SRCS
+    # Hardware/Platform layer (C - ESP-IDF specific)
+    "waveshare_rgb_lcd_port.c"
+    "lvgl_port.c"
+    
+    # Application entry (C)
+    "main.c"
+    
+    # Model layer (C++)
+    "model/Locomotive.cpp"
+    "model/Throttle.cpp"
+    "model/Roster.cpp"
+    "model/Knob.cpp"
+    
+    # Controller layer (C++)
+    "controller/ThrottleController.cpp"
+    
+    # Communication layer (C++)
+    "communication/WiFiManager.cpp"
+    "communication/WiThrottleClient.cpp"
+    "communication/JmriJsonClient.cpp"
+    
+    # UI layer (C++)
+    "ui/ThrottleMeter.cpp"
+    "ui/VirtualEncoderPanel.cpp"
+    "ui/WiFiConfigScreen.cpp"
+    "ui/wifi_config_wrapper.cpp"
+    "ui/JmriConfigScreen.cpp"
+    "ui/jmri_config_wrapper.cpp"
+    "ui/MainScreen.cpp"
+    "ui/main_screen_wrapper.cpp"
+)
+
+set(REQUIRES_LIST)
+
+if(CONFIG_THROTTLE_TESTS)
+    list(APPEND APP_SRCS
+        "tests/ThrottleControllerTests.cpp"
+        "tests/LocomotiveTests.cpp"
+        "tests/ModelRosterTests.cpp"
+        "tests/ProtocolParsingTests.cpp"
+        "tests/ThrottleModelTests.cpp"
+        "tests/TestRunner.cpp"
+    )
+    list(APPEND REQUIRES_LIST unity)
+endif()
+
 idf_component_register(
-    SRCS 
-        # Hardware/Platform layer (C - ESP-IDF specific)
-        "waveshare_rgb_lcd_port.c"
-        "lvgl_port.c"
-        
-        # Application entry (C)
-        "main.c"
-        
-        # Model layer (C++)
-        "model/Locomotive.cpp"
-        "model/Throttle.cpp"
-        "model/Roster.cpp"
-        "model/Knob.cpp"
-        
-        # Controller layer (C++)
-        "controller/ThrottleController.cpp"
-        
-        # Communication layer (C++)
-        "communication/WiFiManager.cpp"
-        "communication/WiThrottleClient.cpp"
-        "communication/JmriJsonClient.cpp"
-        
-        # UI layer (C++)
-        "ui/ThrottleMeter.cpp"
-        "ui/VirtualEncoderPanel.cpp"
-        "ui/WiFiConfigScreen.cpp"
-        "ui/wifi_config_wrapper.cpp"
-        "ui/JmriConfigScreen.cpp"
-        "ui/jmri_config_wrapper.cpp"
-        "ui/MainScreen.cpp"
-        "ui/main_screen_wrapper.cpp"
-        
+    SRCS ${APP_SRCS}
     INCLUDE_DIRS 
         "."
         "model"
@@ -39,6 +55,7 @@ idf_component_register(
         "controller"
         "ui"
         "utils"
+    REQUIRES ${REQUIRES_LIST}
 )
 
 # Enable C++17

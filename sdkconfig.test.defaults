@@ -1,0 +1,2 @@
+# Test build overrides (merged via SDKCONFIG_DEFAULTS)
+CONFIG_THROTTLE_TESTS=y

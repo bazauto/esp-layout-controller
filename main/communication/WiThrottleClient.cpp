@@ -22,14 +22,23 @@ WiThrottleClient::WiThrottleClient()
     , m_connectionCallback(nullptr)
     , m_rosterCallback(nullptr)
     , m_webPortCallback(nullptr)
+    , m_stateMutex(nullptr)
     , m_receiveTaskHandle(nullptr)
     , m_running(false)
 {
+    m_stateMutex = xSemaphoreCreateMutex();
+    if (!m_stateMutex) {
+        ESP_LOGE(TAG, "Failed to create WiThrottle state mutex");
+    }
 }
 
 WiThrottleClient::~WiThrottleClient()
 {
     disconnect();
+    if (m_stateMutex) {
+        vSemaphoreDelete(m_stateMutex);
+        m_stateMutex = nullptr;
+    }
 }
 
 esp_err_t WiThrottleClient::initialize()
@@ -132,6 +141,10 @@ void WiThrottleClient::disconnect()
     setState(ConnectionState::DISCONNECTED);
     m_mainTrackPower = PowerState::UNKNOWN;
     m_progTrackPower = PowerState::UNKNOWN;
+    if (lockState(pdMS_TO_TICKS(50))) {
+        m_throttleStates.clear();
+        unlockState();
+    }
 }
 
 esp_err_t WiThrottleClient::setTrackPower(const std::string& track, bool on)
@@ -185,9 +198,14 @@ esp_err_t WiThrottleClient::acquireLocomotive(char throttleId, int address, bool
     
     // Track the acquired loco state for this throttle
     if (result == ESP_OK) {
-        m_throttleStates[throttleId].acquired = true;
-        m_throttleStates[throttleId].address = address;
-        m_throttleStates[throttleId].addressType = addressType;
+        if (lockState(pdMS_TO_TICKS(50))) {
+            m_throttleStates[throttleId].acquired = true;
+            m_throttleStates[throttleId].address = address;
+            m_throttleStates[throttleId].addressType = addressType;
+            unlockState();
+        } else {
+            ESP_LOGW(TAG, "Failed to lock state for acquire tracking");
+        }
     }
     
     return result;
@@ -211,9 +229,14 @@ esp_err_t WiThrottleClient::releaseLocomotive(char throttleId)
     
     // Clear the throttle state
     if (result == ESP_OK) {
-        m_throttleStates[throttleId].acquired = false;
-        m_throttleStates[throttleId].address = 0;
-        m_throttleStates[throttleId].addressType = 'S';
+        if (lockState(pdMS_TO_TICKS(50))) {
+            m_throttleStates[throttleId].acquired = false;
+            m_throttleStates[throttleId].address = 0;
+            m_throttleStates[throttleId].addressType = 'S';
+            unlockState();
+        } else {
+            ESP_LOGW(TAG, "Failed to lock state for release tracking");
+        }
     }
     
     return result;
@@ -227,11 +250,19 @@ esp_err_t WiThrottleClient::setSpeed(char throttleId, int speed)
     }
     
     // Check if throttle has an acquired loco
+    ThrottleState state;
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Failed to lock state for speed command");
+        return ESP_ERR_INVALID_STATE;
+    }
     auto it = m_throttleStates.find(throttleId);
     if (it == m_throttleStates.end() || !it->second.acquired) {
+        unlockState();
         ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
         return ESP_ERR_INVALID_STATE;
     }
+    state = it->second;
+    unlockState();
     
     // Clamp speed to valid range
     if (speed < 0) speed = 0;
@@ -239,7 +270,6 @@ esp_err_t WiThrottleClient::setSpeed(char throttleId, int speed)
     
     // WiThrottle protocol: M<throttleId>A<addressType><address><;>V<speed>
     // Example: MTAS3<;>V50 (set loco S3 on throttle T to speed 50)
-    const auto& state = it->second;
     std::string command = "M" + std::string(1, throttleId) + 
                          "A" + std::string(1, state.addressType) + std::to_string(state.address) +
                          "<;>V" + std::to_string(speed);
@@ -257,16 +287,23 @@ esp_err_t WiThrottleClient::setDirection(char throttleId, bool forward)
     }
     
     // Check if throttle has an acquired loco
+    ThrottleState state;
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Failed to lock state for direction command");
+        return ESP_ERR_INVALID_STATE;
+    }
     auto it = m_throttleStates.find(throttleId);
     if (it == m_throttleStates.end() || !it->second.acquired) {
+        unlockState();
         ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
         return ESP_ERR_INVALID_STATE;
     }
+    state = it->second;
+    unlockState();
     
     // WiThrottle protocol: M<throttleId>A<addressType><address><;>R<direction>
     // R1 = forward, R0 = reverse
     // Example: MTAS3<;>R1 (set loco S3 on throttle T forward)
-    const auto& state = it->second;
     std::string command = "M" + std::string(1, throttleId) + 
                          "A" + std::string(1, state.addressType) + std::to_string(state.address) +
                          "<;>R" + (forward ? "1" : "0");
@@ -284,11 +321,19 @@ esp_err_t WiThrottleClient::setFunction(char throttleId, int function, bool stat
     }
     
     // Check if throttle has an acquired loco
+    ThrottleState throttleState;
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Failed to lock state for function command");
+        return ESP_ERR_INVALID_STATE;
+    }
     auto it = m_throttleStates.find(throttleId);
     if (it == m_throttleStates.end() || !it->second.acquired) {
+        unlockState();
         ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
         return ESP_ERR_INVALID_STATE;
     }
+    throttleState = it->second;
+    unlockState();
     
     // Validate function number
     if (function < 0 || function > 28) {
@@ -299,7 +344,6 @@ esp_err_t WiThrottleClient::setFunction(char throttleId, int function, bool stat
     // WiThrottle protocol: M<throttleId>A<addressType><address><;>F<state><function>
     // F1<function> = activate, F0<function> = deactivate
     // Example: MTAS3<;>F10 (activate F0 on loco S3, throttle T)
-    const auto& throttleState = it->second;
     std::string command = "M" + std::string(1, throttleId) + 
                          "A" + std::string(1, throttleState.addressType) + std::to_string(throttleState.address) +
                          "<;>F" + (state ? "1" : "0") + std::to_string(function);
@@ -317,15 +361,22 @@ esp_err_t WiThrottleClient::querySpeed(char throttleId)
     }
     
     // Check if throttle has an acquired loco
+    ThrottleState throttleState;
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Failed to lock state for speed query");
+        return ESP_ERR_INVALID_STATE;
+    }
     auto it = m_throttleStates.find(throttleId);
     if (it == m_throttleStates.end() || !it->second.acquired) {
+        unlockState();
         ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
         return ESP_ERR_INVALID_STATE;
     }
+    throttleState = it->second;
+    unlockState();
     
     // WiThrottle protocol: M<throttleId>A<addressType><address><;>qV
     // Response will be: M<throttleId>A<addressType><address><;>V<speed>
-    const auto& throttleState = it->second;
     std::string command = "M" + std::string(1, throttleId) + 
                          "A" + std::string(1, throttleState.addressType) + std::to_string(throttleState.address) +
                          "<;>qV";
@@ -343,15 +394,22 @@ esp_err_t WiThrottleClient::queryDirection(char throttleId)
     }
     
     // Check if throttle has an acquired loco
+    ThrottleState throttleState;
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Failed to lock state for direction query");
+        return ESP_ERR_INVALID_STATE;
+    }
     auto it = m_throttleStates.find(throttleId);
     if (it == m_throttleStates.end() || !it->second.acquired) {
+        unlockState();
         ESP_LOGW(TAG, "No loco acquired on throttle %c", throttleId);
         return ESP_ERR_INVALID_STATE;
     }
+    throttleState = it->second;
+    unlockState();
     
     // WiThrottle protocol: M<throttleId>A<addressType><address><;>qR
     // Response will be: M<throttleId>A<addressType><address><;>R<direction>
-    const auto& throttleState = it->second;
     std::string command = "M" + std::string(1, throttleId) + 
                          "A" + std::string(1, throttleState.addressType) + std::to_string(throttleState.address) +
                          "<;>qR";
@@ -366,6 +424,66 @@ void WiThrottleClient::sendHeartbeat()
     if (isConnected()) {
         sendCommand(CMD_HEARTBEAT);
     }
+}
+
+#if CONFIG_THROTTLE_TESTS
+void WiThrottleClient::testProcessMessage(const std::string& message)
+{
+    processMessage(message);
+}
+#endif
+
+bool WiThrottleClient::lockState(TickType_t timeout) const
+{
+    if (!m_stateMutex) {
+        return true;
+    }
+    return xSemaphoreTake(m_stateMutex, timeout) == pdTRUE;
+}
+
+void WiThrottleClient::unlockState() const
+{
+    if (m_stateMutex) {
+        xSemaphoreGive(m_stateMutex);
+    }
+}
+
+std::vector<WiThrottleClient::Locomotive> WiThrottleClient::getRosterSnapshot() const
+{
+    std::vector<Locomotive> snapshot;
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        return snapshot;
+    }
+    snapshot = m_roster;
+    unlockState();
+    return snapshot;
+}
+
+size_t WiThrottleClient::getRosterSize() const
+{
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        return 0;
+    }
+    size_t size = m_roster.size();
+    unlockState();
+    return size;
+}
+
+bool WiThrottleClient::getRosterEntry(int index, Locomotive& outEntry) const
+{
+    if (index < 0) {
+        return false;
+    }
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        return false;
+    }
+    if (index >= static_cast<int>(m_roster.size())) {
+        unlockState();
+        return false;
+    }
+    outEntry = m_roster[static_cast<size_t>(index)];
+    unlockState();
+    return true;
 }
 
 void WiThrottleClient::receiveTask(void* arg)
@@ -568,8 +686,7 @@ void WiThrottleClient::handleRosterMessage(const std::string& message)
         return;
     }
     
-    // Clear existing roster
-    m_roster.clear();
+    std::vector<Locomotive> newRoster;
     
     // Find the count (ends with ])
     size_t countEnd = message.find(']', 2);
@@ -628,16 +745,23 @@ void WiThrottleClient::handleRosterMessage(const std::string& message)
         
         // Add to roster
         Locomotive loco(address, name, addressType);
-        m_roster.push_back(loco);
+    newRoster.push_back(loco);
         
         ESP_LOGD(TAG, "  Loco %d: '%s' addr=%d (%c)", i + 1, name.c_str(), address, addressType);
     }
     
-    ESP_LOGI(TAG, "Roster loaded: %d locomotives", m_roster.size());
+    ESP_LOGI(TAG, "Roster loaded: %d locomotives", newRoster.size());
+
+    if (lockState(pdMS_TO_TICKS(50))) {
+        m_roster = newRoster;
+        unlockState();
+    } else {
+        ESP_LOGW(TAG, "Failed to lock state for roster update");
+    }
     
-    // Notify callback
+    // Notify callback with snapshot
     if (m_rosterCallback) {
-        m_rosterCallback(m_roster);
+        m_rosterCallback(newRoster);
     }
 }
 

@@ -46,7 +46,7 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     
     // Create scale
     m_scaleId = lv_meter_add_scale(m_meter);
-    lv_meter_set_scale_range(m_meter, m_scaleId, m_min, m_max, 220, 360 - 220);
+    lv_meter_set_scale_range(m_meter, m_scaleId, m_min, m_max, 230, 360 - 230);
     lv_meter_set_scale_ticks(m_meter, m_scaleId, 21, 3, 17, lv_color_white());
     lv_meter_set_scale_major_ticks(m_meter, m_scaleId, 4, 4, 22, lv_color_white(), 15);
     

@@ -5,8 +5,10 @@
 #include <map>
 #include <functional>
 #include "esp_err.h"
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 /**
  * @brief WiThrottle Protocol Client for JMRI
@@ -226,9 +228,32 @@ public:
     void setThrottleStateCallback(ThrottleStateCallback callback) { m_throttleCallback = callback; }
     
     /**
-     * @brief Get current roster
+    * @brief Get current roster (not thread-safe; prefer getRosterSnapshot/getRosterEntry)
      */
     const std::vector<Locomotive>& getRoster() const { return m_roster; }
+
+    /**
+    * @brief Get a copy of the current roster (thread-safe)
+    */
+    std::vector<Locomotive> getRosterSnapshot() const;
+
+    /**
+    * @brief Get number of roster entries (thread-safe)
+    */
+    size_t getRosterSize() const;
+
+    /**
+    * @brief Get a roster entry by index (thread-safe)
+    * @return true if index valid and entry copied
+    */
+    bool getRosterEntry(int index, Locomotive& outEntry) const;
+
+#if CONFIG_THROTTLE_TESTS
+    /**
+     * @brief Test-only hook to process a raw protocol message
+     */
+    void testProcessMessage(const std::string& message);
+#endif
     
     /**
      * @brief Get discovered web server port (0 if not yet discovered)
@@ -242,6 +267,9 @@ public:
     void sendHeartbeat();
 
 private:
+    bool lockState(TickType_t timeout) const;
+    void unlockState() const;
+
     void processMessage(const std::string& message);
     void handlePowerMessage(const std::string& message);
     void handleRosterMessage(const std::string& message);
@@ -277,6 +305,8 @@ private:
     RosterCallback m_rosterCallback;
     WebPortCallback m_webPortCallback;
     ThrottleStateCallback m_throttleCallback;
+
+    mutable SemaphoreHandle_t m_stateMutex;
     
     TaskHandle_t m_receiveTaskHandle;
     bool m_running;
