@@ -21,8 +21,10 @@ set(APP_SRCS
     "communication/JmriJsonClient.cpp"
     
     # UI layer (C++)
-    "ui/ThrottleMeter.cpp"
-    "ui/VirtualEncoderPanel.cpp"
+    "ui/components/ThrottleMeter.cpp"
+    "ui/components/VirtualEncoderPanel.cpp"
+    "ui/components/RosterCarousel.cpp"
+    "ui/components/PowerStatusBar.cpp"
     "ui/WiFiConfigScreen.cpp"
     "ui/wifi_config_wrapper.cpp"
     "ui/JmriConfigScreen.cpp"

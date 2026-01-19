@@ -25,6 +25,20 @@ void Knob::assignToThrottle(int throttleId)
     ESP_LOGI(TAG, "Knob %d assigned to throttle %d (SELECTING)", m_id, throttleId);
 }
 
+void Knob::reassignToThrottle(int throttleId, State newState, bool resetRosterIndex)
+{
+    m_assignedThrottleId = throttleId;
+    m_state = newState;
+    if (resetRosterIndex && newState == State::SELECTING) {
+        m_rosterIndex = 0;
+    }
+
+    ESP_LOGI(TAG, "Knob %d reassigned to throttle %d (%s)",
+             m_id,
+             throttleId,
+             newState == State::SELECTING ? "SELECTING" : "CONTROLLING");
+}
+
 void Knob::startControlling()
 {
     if (m_state != State::SELECTING) {

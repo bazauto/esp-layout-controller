@@ -51,6 +51,14 @@ public:
      * @param throttleId Throttle ID (0-3)
      */
     void assignToThrottle(int throttleId);
+
+    /**
+     * @brief Reassign knob to a different throttle without forcing IDLE
+     * @param throttleId Throttle ID (0-3)
+     * @param newState Target knob state after reassignment
+     * @param resetRosterIndex Reset roster index when entering SELECTING
+     */
+    void reassignToThrottle(int throttleId, State newState, bool resetRosterIndex = true);
     
     /**
      * @brief Transition from SELECTING to CONTROLLING

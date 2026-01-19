@@ -1,8 +1,10 @@
 #pragma once
 
 #include "lvgl.h"
-#include "ThrottleMeter.h"
-#include "VirtualEncoderPanel.h"
+#include "components/ThrottleMeter.h"
+#include "components/VirtualEncoderPanel.h"
+#include "components/RosterCarousel.h"
+#include "components/PowerStatusBar.h"
 #include "../model/Throttle.h"
 #include "../controller/ThrottleController.h"
 #include "../communication/WiThrottleClient.h"
@@ -57,15 +59,11 @@ public:
     Throttle* getThrottle(int throttleId);
 
 private:
-    void createTrackPowerControls(lv_obj_t* parent);
-    void updateTrackPowerButton(lv_obj_t* button, JmriJsonClient::PowerState state);
+    void createRosterPanel(lv_obj_t* parent);
     
     // Event handlers
     static void onSettingsButtonClicked(lv_event_t* e);
     static void onJmriButtonClicked(lv_event_t* e);
-    static void onTrackPowerClicked(lv_event_t* e);
-    static void onJmriPowerChanged(void* userData, const std::string& powerName, JmriJsonClient::PowerState state);
-    static void onJmriConnectionChanged(void* userData, JmriJsonClient::ConnectionState state);
     
     // Test control event handlers
     static void onAcquireButtonClicked(lv_event_t* e);
@@ -75,15 +73,14 @@ private:
     static void onF0ButtonClicked(lv_event_t* e);
     static void onOldReleaseButtonClicked(lv_event_t* e);  // Old test button
     
-    void updateConnectionStatus();
     
     // LVGL UI components
     lv_obj_t* m_screen;
     lv_obj_t* m_leftPanel;
     lv_obj_t* m_rightPanel;
     lv_obj_t* m_settingsButton;
-    lv_obj_t* m_trackPowerButton;
-    lv_obj_t* m_connectionStatusLabel;
+    std::unique_ptr<PowerStatusBar> m_powerStatusBar;
+    std::unique_ptr<RosterCarousel> m_rosterCarousel;
     
     // Throttle meters (C++ widgets)
     std::array<std::unique_ptr<ThrottleMeter>, 4> m_throttleMeters;

@@ -34,6 +34,16 @@ public:
         std::string locoName;
         int locoAddress;
     };
+
+    struct RosterSelectionSnapshot {
+        bool active = false;
+        int throttleId = -1;
+        int knobId = -1;
+        int rosterIndex = 0;
+        bool hasRosterEntry = false;
+        std::string rosterName;
+        int rosterAddress = 0;
+    };
     
     /**
      * @brief Constructor
@@ -91,6 +101,12 @@ public:
      * @return true if snapshot was captured
      */
     bool getThrottleSnapshot(int throttleId, ThrottleSnapshot& outSnapshot) const;
+
+    /**
+     * @brief Get current roster selection (if any knob is selecting)
+     * @return true if snapshot was captured
+     */
+    bool getRosterSelectionSnapshot(RosterSelectionSnapshot& outSnapshot) const;
     
     /**
      * @brief Get knob model
@@ -128,6 +144,7 @@ private:
 
     void updateUI();
     void sendSpeedCommand(int throttleId, int speed);
+    void sendDirectionCommand(int throttleId, bool forward);
     std::unique_ptr<Locomotive> createLocomotiveFromRoster(const WiThrottleClient::Locomotive& rosterEntry);
     
     // WiThrottle callback handlers

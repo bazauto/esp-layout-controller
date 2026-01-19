@@ -20,8 +20,8 @@ MainScreen::MainScreen()
     , m_leftPanel(nullptr)
     , m_rightPanel(nullptr)
     , m_settingsButton(nullptr)
-    , m_trackPowerButton(nullptr)
-    , m_connectionStatusLabel(nullptr)
+    , m_powerStatusBar(nullptr)
+    , m_rosterCarousel(nullptr)
     , m_wiThrottleClient(nullptr)
     , m_jmriClient(nullptr)
 {
@@ -87,9 +87,9 @@ void MainScreen::createLeftPanel()
     lv_obj_remove_style_all(m_leftPanel);
     lv_obj_set_grid_cell(m_leftPanel, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
     
-    // Use 3 rows on left: top padding, meters, bottom padding
+    // Use a single row on left for meters (maximize vertical space)
     static lv_coord_t leftCol[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
-    static lv_coord_t leftRow[] = {LV_GRID_FR(1), LV_GRID_FR(8), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
+    static lv_coord_t leftRow[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     lv_obj_set_grid_dsc_array(m_leftPanel, leftCol, leftRow);
 }
 
@@ -99,18 +99,18 @@ void MainScreen::createRightPanel()
     m_rightPanel = lv_obj_create(lv_obj_get_parent(m_leftPanel));
     lv_obj_set_grid_cell(m_rightPanel, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
     lv_obj_set_flex_flow(m_rightPanel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(m_rightPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(m_rightPanel, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(m_rightPanel, 10, 0);
     lv_obj_set_style_pad_row(m_rightPanel, 10, 0);
+    lv_obj_set_style_pad_bottom(m_rightPanel, 70, 0);
     
     // Add track power controls at the top
-    createTrackPowerControls(m_rightPanel);
+    m_powerStatusBar = std::make_unique<PowerStatusBar>();
+    m_powerStatusBar->create(m_rightPanel, m_jmriClient);
     
-    // Divider
-    lv_obj_t* divider = lv_obj_create(m_rightPanel);
-    lv_obj_set_size(divider, LV_PCT(90), 2);
-    lv_obj_set_style_bg_color(divider, lv_palette_main(LV_PALETTE_GREY), 0);
-    lv_obj_set_style_border_width(divider, 0, 0);
+    // Roster selection carousel
+    m_rosterCarousel = std::make_unique<RosterCarousel>();
+    m_rosterCarousel->create(m_rightPanel);
     
     // Virtual encoder panel for testing
     m_virtualEncoderPanel = std::make_unique<VirtualEncoderPanel>();
@@ -122,10 +122,10 @@ void MainScreen::createRightPanel()
 
 void MainScreen::createThrottleMeters()
 {
-    // Container for the 2x2 grid of meters (in the middle row)
+    // Container for the 2x2 grid of meters (full height)
     lv_obj_t* meterGrid = lv_obj_create(m_leftPanel);
     lv_obj_remove_style_all(meterGrid);
-    lv_obj_set_grid_cell(meterGrid, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 1, 1);
+    lv_obj_set_grid_cell(meterGrid, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
     
     // Grid for meters: 2 columns x 2 rows
     static lv_coord_t gridCol[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
@@ -214,6 +214,9 @@ void MainScreen::updateThrottle(int throttleId)
     // Update speed display
     meter->setValue(snapshot.currentSpeed);
 
+    // Update direction indicator
+    meter->setDirection(snapshot.direction);
+
     // Update loco info
     if (snapshot.hasLocomotive) {
         meter->setLocomotive(snapshot.locoName.c_str(), snapshot.locoAddress);
@@ -242,166 +245,15 @@ void MainScreen::updateAllThrottles()
     for (int i = 0; i < 4; ++i) {
         updateThrottle(i);
     }
-}
 
+    if (m_rosterCarousel) {
+        m_rosterCarousel->update(m_throttleController);
+    }
+}
 Throttle* MainScreen::getThrottle(int throttleId)
 {
     if (!m_throttleController) return nullptr;
     return m_throttleController->getThrottle(throttleId);
-}
-
-void MainScreen::createTrackPowerControls(lv_obj_t* parent)
-{
-    // Create a horizontal status bar at the top of the right panel
-    lv_obj_t* statusBar = lv_obj_create(parent);
-    lv_obj_set_size(statusBar, LV_PCT(90), 50);
-    lv_obj_align(statusBar, LV_ALIGN_TOP_MID, 0, 5);
-    lv_obj_set_flex_flow(statusBar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(statusBar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(statusBar, 5, 0);
-    lv_obj_set_style_pad_column(statusBar, 10, 0);
-    
-    // Track power button (compact, square-ish)
-    m_trackPowerButton = lv_btn_create(statusBar);
-    lv_obj_set_size(m_trackPowerButton, 160, 40);
-    lv_obj_t* powerLabel = lv_label_create(m_trackPowerButton);
-    lv_label_set_text(powerLabel, "Track Power");
-    lv_obj_center(powerLabel);
-    lv_obj_add_event_cb(m_trackPowerButton, onTrackPowerClicked, LV_EVENT_CLICKED, this);
-    
-    // Connection status indicator
-    m_connectionStatusLabel = lv_label_create(statusBar);
-    lv_label_set_text(m_connectionStatusLabel, LV_SYMBOL_CLOSE " Disconnected");
-    lv_obj_set_style_text_color(m_connectionStatusLabel, lv_color_hex(0xFF0000), 0);
-    lv_obj_center(m_connectionStatusLabel);
-    
-    // Set initial state
-    if (m_jmriClient) {
-        updateTrackPowerButton(m_trackPowerButton, m_jmriClient->getPower());
-        
-        // Register for power state updates
-        m_jmriClient->setPowerStateCallback([this](const std::string& powerName, JmriJsonClient::PowerState state) {
-            onJmriPowerChanged(this, powerName, state);
-        });
-        
-        // Register for connection state updates
-        m_jmriClient->setConnectionStateCallback([this](JmriJsonClient::ConnectionState state) {
-            onJmriConnectionChanged(this, state);
-        });
-        
-        // Update initial connection status
-        updateConnectionStatus();
-    }
-}
-
-void MainScreen::updateTrackPowerButton(lv_obj_t* button, JmriJsonClient::PowerState state)
-{
-    if (!button) return;
-    
-    lv_obj_t* label = lv_obj_get_child(button, 0);
-    if (!label) return;
-    
-    // Determine button color and text based on state
-    uint32_t color;
-    const char* stateText;
-    
-    switch (state) {
-        case JmriJsonClient::PowerState::ON:
-            color = 0x00AA00;  // Green
-            stateText = "Power";
-            break;
-        case JmriJsonClient::PowerState::OFF:
-            color = 0xAA0000;  // Red
-            stateText = "Power";
-            break;
-        default:
-            color = 0x888888;  // Gray
-            stateText = "Power";
-            break;
-    }
-    
-    lv_obj_set_style_bg_color(button, lv_color_hex(color), 0);
-    lv_label_set_text(label, stateText);
-}
-
-void MainScreen::onTrackPowerClicked(lv_event_t* e)
-{
-    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
-    
-    if (!screen->m_jmriClient || !screen->m_jmriClient->isConnected()) {
-        ESP_LOGW(TAG, "Not connected to JMRI server");
-        return;
-    }
-    
-    // Toggle power state
-    auto currentState = screen->m_jmriClient->getPower();
-    bool newState = (currentState != JmriJsonClient::PowerState::ON);
-    
-    ESP_LOGI(TAG, "Toggling track power: %s", newState ? "ON" : "OFF");
-    screen->m_jmriClient->setPower(newState);
-}
-
-void MainScreen::onJmriPowerChanged(void* userData, const std::string& powerName, JmriJsonClient::PowerState state)
-{
-    MainScreen* screen = static_cast<MainScreen*>(userData);
-    
-    // Update the power button
-    // Note: This is called from JMRI JSON receive task, so we need LVGL lock
-    if (lvgl_port_lock(-1)) {
-        screen->updateTrackPowerButton(screen->m_trackPowerButton, state);
-        lvgl_port_unlock();
-    }
-}
-
-void MainScreen::onJmriConnectionChanged(void* userData, JmriJsonClient::ConnectionState state)
-{
-    MainScreen* screen = static_cast<MainScreen*>(userData);
-    
-    // Update connection status
-    // Note: This is called from WebSocket task, so we need LVGL lock
-    if (lvgl_port_lock(-1)) {
-        screen->updateConnectionStatus();
-        lvgl_port_unlock();
-    }
-}
-
-void MainScreen::updateConnectionStatus()
-{
-    if (!m_connectionStatusLabel || !m_jmriClient) return;
-    
-    auto state = m_jmriClient->getState();
-    
-    const char* icon;
-    const char* text;
-    uint32_t color;
-    
-    switch (state) {
-        case JmriJsonClient::ConnectionState::CONNECTED:
-            icon = LV_SYMBOL_OK;
-            text = " Connected";
-            color = 0x00AA00;  // Green
-            break;
-        case JmriJsonClient::ConnectionState::CONNECTING:
-            icon = LV_SYMBOL_REFRESH;
-            text = " Connecting";
-            color = 0xFFAA00;  // Orange
-            break;
-        case JmriJsonClient::ConnectionState::FAILED:
-            icon = LV_SYMBOL_WARNING;
-            text = " Failed";
-            color = 0xFF0000;  // Red
-            break;
-        case JmriJsonClient::ConnectionState::DISCONNECTED:
-        default:
-            icon = LV_SYMBOL_CLOSE;
-            text = " Disconnected";
-            color = 0x888888;  // Gray
-            break;
-    }
-    
-    std::string statusText = std::string(icon) + text;
-    lv_label_set_text(m_connectionStatusLabel, statusText.c_str());
-    lv_obj_set_style_text_color(m_connectionStatusLabel, lv_color_hex(color), 0);
 }
 
 // Test control event handlers

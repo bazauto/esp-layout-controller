@@ -88,6 +88,29 @@ static void test_controller_move_knob_between_throttles(void)
     TEST_ASSERT_EQUAL(0, throttle1->getAssignedKnob());
 }
 
+static void test_controller_move_knob_to_unallocated_for_selection(void)
+{
+    WiThrottleClient client;
+    ThrottleController controller(&client);
+
+    setupThrottleWithLoco(controller, 0, 0, "LocoA", 10);
+
+    controller.onKnobIndicatorTouched(1, 0);
+
+    Throttle* throttle0 = controller.getThrottle(0);
+    Throttle* throttle1 = controller.getThrottle(1);
+    Knob* knob0 = controller.getKnob(0);
+
+    TEST_ASSERT_NOT_NULL(throttle0);
+    TEST_ASSERT_NOT_NULL(throttle1);
+    TEST_ASSERT_NOT_NULL(knob0);
+
+    TEST_ASSERT_EQUAL(Throttle::State::ALLOCATED_NO_KNOB, throttle0->getState());
+    TEST_ASSERT_EQUAL(Throttle::State::SELECTING, throttle1->getState());
+    TEST_ASSERT_EQUAL(Knob::State::SELECTING, knob0->getState());
+    TEST_ASSERT_EQUAL(1, knob0->getAssignedThrottleId());
+}
+
 static void test_controller_release_resets_knob(void)
 {
     WiThrottleClient client;
@@ -127,10 +150,51 @@ static void test_controller_rotation_updates_speed(void)
     TEST_ASSERT_LESS_OR_EQUAL_INT(126, speed);
 }
 
+static void test_controller_rotation_cross_zero_switches_to_reverse(void)
+{
+    WiThrottleClient client;
+    ThrottleController controller(&client);
+
+    setupThrottleWithLoco(controller, 0, 0, "LocoE", 50);
+
+    Throttle* throttle = controller.getThrottle(0);
+    TEST_ASSERT_NOT_NULL(throttle);
+
+    throttle->setSpeed(4);
+    throttle->setDirection(true);
+
+    controller.onKnobRotation(0, -2); // 4 + (-2*4) = -4
+
+    TEST_ASSERT_EQUAL_INT(4, throttle->getCurrentSpeed());
+    TEST_ASSERT_FALSE(throttle->getDirection());
+}
+
+static void test_controller_rotation_cross_zero_switches_to_forward(void)
+{
+    WiThrottleClient client;
+    ThrottleController controller(&client);
+
+    setupThrottleWithLoco(controller, 0, 0, "LocoF", 60);
+
+    Throttle* throttle = controller.getThrottle(0);
+    TEST_ASSERT_NOT_NULL(throttle);
+
+    throttle->setSpeed(8);
+    throttle->setDirection(false);
+
+    controller.onKnobRotation(0, 3); // -8 + (3*4) = 4
+
+    TEST_ASSERT_EQUAL_INT(4, throttle->getCurrentSpeed());
+    TEST_ASSERT_TRUE(throttle->getDirection());
+}
+
 extern "C" void register_controller_tests(void)
 {
     RUN_TEST(test_controller_assign_knob_to_unallocated);
     RUN_TEST(test_controller_move_knob_between_throttles);
+    RUN_TEST(test_controller_move_knob_to_unallocated_for_selection);
     RUN_TEST(test_controller_release_resets_knob);
     RUN_TEST(test_controller_rotation_updates_speed);
+    RUN_TEST(test_controller_rotation_cross_zero_switches_to_reverse);
+    RUN_TEST(test_controller_rotation_cross_zero_switches_to_forward);
 }

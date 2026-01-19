@@ -34,7 +34,6 @@ lv_obj_t* VirtualEncoderPanel::create(lv_obj_t* parent,
     lv_obj_set_flex_align(m_panel, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(m_panel, 5, 0);
     lv_obj_set_style_pad_column(m_panel, 5, 0);
-    lv_obj_align(m_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
     
     // Knob selection buttons (compact)
     for (int i = 0; i < 2; i++) {

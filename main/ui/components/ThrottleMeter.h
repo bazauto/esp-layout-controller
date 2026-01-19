@@ -122,6 +122,12 @@ public:
      */
     void setReleaseCallback(lv_event_cb_t callback, void* userData);
 
+    /**
+     * @brief Set the direction indicator
+     * @param forward true for forward, false for reverse
+     */
+    void setDirection(bool forward);
+
 private:
     void createKnobIndicators();
     void createButtons();
@@ -136,6 +142,8 @@ private:
     lv_obj_t* m_unitLabel;
     lv_obj_t* m_locoLabel;           // Loco name and address
     lv_obj_t* m_knobIndicators[2];   // L and R indicators
+    lv_obj_t* m_directionIndicator;  // Forward/Reverse indicator
+    lv_obj_t* m_buttonRow;           // Row for functions/release
     lv_obj_t* m_functionsButton;
     lv_obj_t* m_releaseButton;
     
@@ -147,10 +155,12 @@ private:
     bool m_animRunning;
     int m_assignedKnob;              // -1, 0, or 1
     bool m_knobAvailable[2];         // Availability for each knob
+    bool m_forwardDirection;         // true=forward, false=reverse
     void* m_userData;                 // User data for callbacks
     
     // Constants
     static constexpr lv_coord_t BASE_SIZE = 200;
+    static constexpr lv_coord_t EXTRA_HEIGHT = 60;
     
     // Animation callback
     static void animationCallback(void* var, int32_t value);

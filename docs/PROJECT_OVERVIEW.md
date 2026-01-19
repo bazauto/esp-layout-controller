@@ -99,6 +99,14 @@
 - **Structure**: Class-based OOP design
 - **Encapsulation**: Separate classes for different subsystems
 
+### UI Component Extraction Guidelines
+Extract a new UI component when it:
+- Owns multiple LVGL objects and has its own state/animation.
+- Needs to be reused in more than one screen or panel.
+- Is stable enough that its layout and behavior are unlikely to change daily.
+
+Keep layout wiring inside `MainScreen` while the layout is still evolving.
+
 ### Key Software Components Needed
 
 #### 0. Application Layer (State Management)

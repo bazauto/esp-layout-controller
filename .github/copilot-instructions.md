@@ -105,6 +105,10 @@ void callback() {
 - Be honest about uncertainties
 - Point out code quality issues
 
+### Running tests
+- See `README.md` → “Run test builds (no menuconfig)” for the ESP-IDF test command.
+- If `idf.py` isn’t recognized, run `..\esp-idf\v5.5.2\esp-idf\export.ps1` in PowerShell first.
+
 Current Phase: Core functionality complete, testing with virtual encoders.
 
 

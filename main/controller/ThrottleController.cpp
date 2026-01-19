@@ -75,20 +75,28 @@ void ThrottleController::onKnobIndicatorTouched(int throttleId, int knobId)
     ESP_LOGI(TAG, "Knob %d touched on throttle %d (throttle state=%d, knob state=%d)",
              knobId, throttleId, (int)throttle->getState(), (int)knob->getState());
 
-    // Check if knob is currently controlling a different throttle
+    // Check if knob is currently controlling/selecting a different throttle
     if (knob->getState() != Knob::State::IDLE) {
         int currentThrottleId = knob->getAssignedThrottleId();
         if (currentThrottleId != throttleId && currentThrottleId >= 0) {
-            // Check if target throttle has no knob assigned and has a loco
+            Throttle* oldThrottle = m_throttles[currentThrottleId].get();
+
             if (throttle->getState() == Throttle::State::ALLOCATED_NO_KNOB) {
-                // Move knob to this throttle
-                Throttle* oldThrottle = m_throttles[currentThrottleId].get();
+                // Move knob to allocated throttle (keep controlling)
                 oldThrottle->unassignKnob();
-
                 throttle->assignKnob(knobId);
-                // Knob stays in CONTROLLING state, just changes target
+                knob->reassignToThrottle(throttleId, Knob::State::CONTROLLING, false);
 
-                ESP_LOGI(TAG, "Moved knob %d from throttle %d to throttle %d",
+                ESP_LOGI(TAG, "Moved knob %d from throttle %d to throttle %d (control)",
+                         knobId, currentThrottleId, throttleId);
+                shouldUpdate = true;
+            } else if (throttle->getState() == Throttle::State::UNALLOCATED) {
+                // Move knob to unallocated throttle for roster selection
+                oldThrottle->unassignKnob();
+                throttle->assignKnob(knobId);
+                knob->reassignToThrottle(throttleId, Knob::State::SELECTING, true);
+
+                ESP_LOGI(TAG, "Moved knob %d from throttle %d to throttle %d (selecting)",
                          knobId, currentThrottleId, throttleId);
                 shouldUpdate = true;
             }
@@ -139,10 +147,13 @@ void ThrottleController::onKnobRotation(int knobId, int delta)
     Knob* knob = m_knobs[knobId].get();
     bool shouldUpdate = false;
     bool shouldSendSpeed = false;
+    bool shouldSendDirection = false;
     int throttleId = -1;
     int newSpeed = 0;
     int currentSpeed = 0;
     int stepsPerClick = 0;
+    bool currentDirection = true;
+    bool newDirection = true;
 
     if (knob->getState() == Knob::State::SELECTING) {
         // Scroll through roster
@@ -158,18 +169,35 @@ void ThrottleController::onKnobRotation(int knobId, int delta)
         if (throttleId >= 0) {
             Throttle* throttle = m_throttles[throttleId].get();
             currentSpeed = throttle->getCurrentSpeed();
+            currentDirection = throttle->getDirection();
 
             // Get configured speed steps per click
             stepsPerClick = getSpeedStepsPerClick();
-            newSpeed = currentSpeed + (delta * stepsPerClick);
 
-            // Clamp to 0-126
-            if (newSpeed < 0) newSpeed = 0;
-            if (newSpeed > 126) newSpeed = 126;
+            // Signed speed: forward is positive, reverse is negative
+            int signedSpeed = currentDirection ? currentSpeed : -currentSpeed;
+            int newSignedSpeed = signedSpeed + (delta * stepsPerClick);
+
+            // Clamp to -126..126
+            if (newSignedSpeed > 126) newSignedSpeed = 126;
+            if (newSignedSpeed < -126) newSignedSpeed = -126;
+
+            // Determine new direction (only flip when crossing below 0)
+            if (newSignedSpeed > 0) {
+                newDirection = true;
+            } else if (newSignedSpeed < 0) {
+                newDirection = false;
+            } else {
+                newDirection = currentDirection;
+            }
+
+            newSpeed = newSignedSpeed >= 0 ? newSignedSpeed : -newSignedSpeed;
 
             // Optimistic update (JMRI doesn't always send speed notifications)
             throttle->setSpeed(newSpeed);
+            throttle->setDirection(newDirection);
             shouldSendSpeed = true;
+            shouldSendDirection = (newDirection != currentDirection);
             shouldUpdate = true;
         }
     }
@@ -180,8 +208,18 @@ void ThrottleController::onKnobRotation(int knobId, int delta)
         // Send command to WiThrottle
         sendSpeedCommand(throttleId, newSpeed);
 
-        ESP_LOGI(TAG, "Knob %d changed throttle %d speed: %d -> %d (steps: %d, optimistic + polling)",
-                 knobId, throttleId, currentSpeed, newSpeed, stepsPerClick);
+        if (shouldSendDirection) {
+            sendDirectionCommand(throttleId, newDirection);
+        }
+
+    ESP_LOGI(TAG, "Knob %d changed throttle %d speed: %d -> %d (dir: %s -> %s, steps: %d, optimistic + polling)",
+         knobId,
+         throttleId,
+         currentSpeed,
+         newSpeed,
+         currentDirection ? "forward" : "reverse",
+         newDirection ? "forward" : "reverse",
+         stepsPerClick);
     }
 
     if (shouldUpdate) {
@@ -231,12 +269,21 @@ void ThrottleController::onKnobPress(int knobId)
             return;
         }
     } else if (knob->getState() == Knob::State::CONTROLLING) {
-        // Emergency stop
+        // Normal stop (set speed to 0 with optimistic UI update)
         int throttleId = knob->getAssignedThrottleId();
+        if (throttleId >= 0) {
+            Throttle* throttle = m_throttles[throttleId].get();
+            if (throttle) {
+                throttle->setSpeed(0);
+            }
+        }
+
         unlockState();
+
         if (throttleId >= 0) {
             sendSpeedCommand(throttleId, 0);
-            ESP_LOGI(TAG, "Knob %d emergency stop on throttle %d", knobId, throttleId);
+            ESP_LOGI(TAG, "Knob %d stop on throttle %d", knobId, throttleId);
+            updateUI();
         }
         return;
     }
@@ -377,10 +424,48 @@ bool ThrottleController::getThrottleSnapshot(int throttleId, ThrottleSnapshot& o
     return true;
 }
 
+bool ThrottleController::getRosterSelectionSnapshot(RosterSelectionSnapshot& outSnapshot) const
+{
+    outSnapshot = RosterSelectionSnapshot{};
+
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        return false;
+    }
+
+    for (int i = 0; i < NUM_KNOBS; i++) {
+        Knob* knob = m_knobs[i].get();
+        if (knob && knob->getState() == Knob::State::SELECTING) {
+            outSnapshot.active = true;
+            outSnapshot.knobId = i;
+            outSnapshot.throttleId = knob->getAssignedThrottleId();
+            outSnapshot.rosterIndex = knob->getRosterIndex();
+            break;
+        }
+    }
+
+    if (outSnapshot.active && m_wiThrottleClient) {
+        WiThrottleClient::Locomotive entry;
+        if (m_wiThrottleClient->getRosterEntry(outSnapshot.rosterIndex, entry)) {
+            outSnapshot.hasRosterEntry = true;
+            outSnapshot.rosterName = entry.name;
+            outSnapshot.rosterAddress = entry.address;
+        }
+    }
+
+    unlockState();
+    return true;
+}
+
 void ThrottleController::sendSpeedCommand(int throttleId, int speed)
 {
     // '0' + throttleId gives '0', '1', '2', or '3' - used to convert to char
     m_wiThrottleClient->setSpeed('0' + throttleId, speed);
+}
+
+void ThrottleController::sendDirectionCommand(int throttleId, bool forward)
+{
+    // '0' + throttleId gives '0', '1', '2', or '3' - used to convert to char
+    m_wiThrottleClient->setDirection('0' + throttleId, forward);
 }
 
 std::unique_ptr<Locomotive> ThrottleController::createLocomotiveFromRoster(const WiThrottleClient::Locomotive& rosterEntry)

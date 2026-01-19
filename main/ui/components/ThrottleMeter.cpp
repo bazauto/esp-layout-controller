@@ -8,6 +8,7 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     , m_valueLabel(nullptr)
     , m_unitLabel(nullptr)
     , m_locoLabel(nullptr)
+    , m_buttonRow(nullptr)
     , m_functionsButton(nullptr)
     , m_releaseButton(nullptr)
     , m_min(0)
@@ -20,13 +21,18 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
 {
     m_knobIndicators[0] = nullptr;
     m_knobIndicators[1] = nullptr;
+    m_directionIndicator = nullptr;
     m_knobAvailable[0] = true;
     m_knobAvailable[1] = true;
+    m_forwardDirection = true;
     // Create container
     m_container = lv_obj_create(parent);
     lv_obj_remove_style_all(m_container);
     lv_obj_set_size(m_container, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_flow(m_container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(m_container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(m_container, 4, 0);
+    lv_obj_set_style_pad_top(m_container, 4, 0);
     
     // Create the meter
     m_meter = lv_meter_create(m_container);
@@ -46,49 +52,13 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     
     // Create scale
     m_scaleId = lv_meter_add_scale(m_meter);
-    lv_meter_set_scale_range(m_meter, m_scaleId, m_min, m_max, 230, 360 - 230);
+    lv_meter_set_scale_range(m_meter, m_scaleId, m_min, m_max, 250, 360 - 220);
     lv_meter_set_scale_ticks(m_meter, m_scaleId, 21, 3, 17, lv_color_white());
     lv_meter_set_scale_major_ticks(m_meter, m_scaleId, 4, 4, 22, lv_color_white(), 15);
     
-    // Color arcs and lines (three zones)
-    lv_meter_indicator_t* indic;
-    
-    // Red zone (0-20)
-    indic = lv_meter_add_arc(m_meter, m_scaleId, 10, lv_palette_main(LV_PALETTE_RED), 0);
-    lv_meter_set_indicator_start_value(m_meter, indic, 0);
-    lv_meter_set_indicator_end_value(m_meter, indic, 20);
-    
-    indic = lv_meter_add_scale_lines(m_meter, m_scaleId, 
-        lv_palette_darken(LV_PALETTE_RED, 3), 
-        lv_palette_darken(LV_PALETTE_RED, 3), true, 0);
-    lv_meter_set_indicator_start_value(m_meter, indic, 0);
-    lv_meter_set_indicator_end_value(m_meter, indic, 20);
-    
-    // Blue zone (20-40)
-    indic = lv_meter_add_arc(m_meter, m_scaleId, 12, lv_palette_main(LV_PALETTE_BLUE), 0);
-    lv_meter_set_indicator_start_value(m_meter, indic, 20);
-    lv_meter_set_indicator_end_value(m_meter, indic, 40);
-    
-    indic = lv_meter_add_scale_lines(m_meter, m_scaleId, 
-        lv_palette_darken(LV_PALETTE_BLUE, 3), 
-        lv_palette_darken(LV_PALETTE_BLUE, 3), true, 0);
-    lv_meter_set_indicator_start_value(m_meter, indic, 20);
-    lv_meter_set_indicator_end_value(m_meter, indic, 40);
-    
-    // Green zone (40-60)
-    indic = lv_meter_add_arc(m_meter, m_scaleId, 10, lv_palette_main(LV_PALETTE_GREEN), 0);
-    lv_meter_set_indicator_start_value(m_meter, indic, 40);
-    lv_meter_set_indicator_end_value(m_meter, indic, 60);
-    
-    indic = lv_meter_add_scale_lines(m_meter, m_scaleId, 
-        lv_palette_darken(LV_PALETTE_GREEN, 3), 
-        lv_palette_darken(LV_PALETTE_GREEN, 3), true, 0);
-    lv_meter_set_indicator_start_value(m_meter, indic, 40);
-    lv_meter_set_indicator_end_value(m_meter, indic, 60);
-    
     // Needle
-    m_needle = lv_meter_add_needle_line(m_meter, m_scaleId, 4, 
-        lv_palette_darken(LV_PALETTE_GREY, 4), -25);
+    m_needle = lv_meter_add_needle_line(m_meter, m_scaleId, 10, 
+        lv_palette_darken(LV_PALETTE_GREY, 2), -25);
     
     // Value label
     m_valueLabel = lv_label_create(m_meter);
@@ -145,10 +115,10 @@ void ThrottleMeter::setScale(float scale)
     m_scale = scale > 0 ? scale : 1.0f;
     
     lv_coord_t size = static_cast<lv_coord_t>(BASE_SIZE * m_scale);
-    lv_obj_set_size(m_container, size, size);
+    lv_obj_set_size(m_container, size, size + EXTRA_HEIGHT);
     
     // Make the meter roughly square inside the container
-    lv_obj_set_size(m_meter, lv_pct(100), lv_pct(100));
+    lv_obj_set_size(m_meter, lv_pct(100), size);
     
     // Align labels relative to meter
     lv_obj_align(m_valueLabel, LV_ALIGN_TOP_MID, 10, lv_pct(55));
@@ -245,23 +215,43 @@ void ThrottleMeter::createKnobIndicators()
         // Store knob ID in user data
         lv_obj_set_user_data(m_knobIndicators[i], (void*)(intptr_t)i);
     }
+
+    // Direction indicator centered between L/R buttons
+    m_directionIndicator = lv_btn_create(m_meter);
+    lv_obj_set_size(m_directionIndicator, 36, 30);
+    lv_obj_align(m_directionIndicator, LV_ALIGN_BOTTOM_MID, 0, -5);
+
+    lv_obj_t* directionLabel = lv_label_create(m_directionIndicator);
+    lv_label_set_text(directionLabel, "F");
+    lv_obj_center(directionLabel);
+
+    // Default to forward
+    lv_obj_set_style_bg_color(m_directionIndicator, lv_palette_main(LV_PALETTE_GREEN), 0);
     
     updateKnobIndicators();
 }
 
 void ThrottleMeter::createButtons()
 {
+    lv_coord_t btnHeight = 30;
     // Create functions and release buttons (initially hidden)
-    m_functionsButton = lv_btn_create(m_container);
-    lv_obj_set_size(m_functionsButton, LV_PCT(45), 35);
+    m_buttonRow = lv_obj_create(m_container);
+    lv_obj_remove_style_all(m_buttonRow);
+    lv_obj_set_size(m_buttonRow, LV_PCT(100), btnHeight);
+    lv_obj_set_flex_flow(m_buttonRow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(m_buttonRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(m_buttonRow, 8, 0);
+
+    m_functionsButton = lv_btn_create(m_buttonRow);
+    lv_obj_set_size(m_functionsButton, LV_PCT(45), btnHeight);
     lv_obj_add_flag(m_functionsButton, LV_OBJ_FLAG_HIDDEN);
     
     lv_obj_t* funcLabel = lv_label_create(m_functionsButton);
     lv_label_set_text(funcLabel, "Functions");
     lv_obj_center(funcLabel);
     
-    m_releaseButton = lv_btn_create(m_container);
-    lv_obj_set_size(m_releaseButton, LV_PCT(45), 35);
+    m_releaseButton = lv_btn_create(m_buttonRow);
+    lv_obj_set_size(m_releaseButton, LV_PCT(45), btnHeight);
     lv_obj_add_flag(m_releaseButton, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_bg_color(m_releaseButton, lv_palette_main(LV_PALETTE_RED), 0);
     
@@ -333,6 +323,25 @@ void ThrottleMeter::setKnobTouchCallback(lv_event_cb_t callback, void* userData)
             lv_obj_add_event_cb(m_knobIndicators[i], callback, LV_EVENT_CLICKED, userData);
         }
     }
+}
+
+void ThrottleMeter::setDirection(bool forward)
+{
+    m_forwardDirection = forward;
+
+    if (!m_directionIndicator) {
+        return;
+    }
+
+    lv_obj_t* label = lv_obj_get_child(m_directionIndicator, 0);
+    if (label) {
+        lv_label_set_text(label, forward ? "F" : "R");
+    }
+
+    lv_obj_set_style_bg_color(
+        m_directionIndicator,
+        forward ? lv_palette_main(LV_PALETTE_GREEN) : lv_palette_main(LV_PALETTE_RED),
+        0);
 }
 
 void ThrottleMeter::setFunctionsCallback(lv_event_cb_t callback, void* userData)
