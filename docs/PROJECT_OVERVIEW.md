@@ -110,9 +110,9 @@ Keep layout wiring inside `MainScreen` while the layout is still evolving.
 ### Key Software Components Needed
 
 #### 0. Application Layer (State Management)
-**Location**: `main/ui/main_screen_wrapper.cpp`
+**Location**: `main/controller/AppController.cpp`
 
-**Purpose**: Owns and manages all application state independently of UI lifecycle.
+**Purpose**: Owns and manages all application state independently of UI lifecycle. C entry (`main.c`) only initializes hardware and delegates to the AppController via the wrapper in `ui/wrappers/`.
 
 **Singletons (persist across UI changes):**
 - **WiThrottleClient**: Network communication with JMRI
@@ -210,7 +210,7 @@ void show_main_screen(void) {
 **⚠️ CRITICAL**: Controllers live at **application layer**, not UI layer!
 
 - **ThrottleController Class**: Application state coordinator (singleton)
-  - **Owned by**: `main_screen_wrapper.cpp` (survives screen changes)
+  - **Owned by**: `controller/AppController.cpp` (survives screen changes)
   - **Ownership**: Owns 4 Throttle instances, 2 Knob instances
   - **Responsibilities**:
     - Manages all knob-to-throttle assignments

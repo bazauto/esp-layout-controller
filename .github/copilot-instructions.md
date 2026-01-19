@@ -37,7 +37,7 @@ main/
 **State lives at APPLICATION LAYER, NOT in UI!**
 
 ```
-Application Layer (main_screen_wrapper.cpp)
+Application Layer (controller/AppController.cpp)
   ├─> WiThrottleClient (singleton)
   ├─> JmriJsonClient (singleton)  
   └─> ThrottleController (singleton) ← OWNS ALL STATE
@@ -152,3 +152,4 @@ We are at the beginning of Phase 2: Planning complete, starting C++ migration an
 - **Optimize for constraints** - be mindful of ESP32-S3 limitations
 - **Honesty about uncertainties** - if unsure, let's discuss before proceeding, be brutally honest about what you don't know
 - **Honest reviews** - if code doesn't meet standards, point it out clearly, suggest improvements and when I ask for changes, be honest about feasibility and implications
+- **Always** use British English spelling conventions

@@ -14,6 +14,9 @@ set(APP_SRCS
     
     # Controller layer (C++)
     "controller/ThrottleController.cpp"
+    "controller/AppController.cpp"
+    "controller/WiFiController.cpp"
+    "controller/JmriConnectionController.cpp"
     
     # Communication layer (C++)
     "communication/WiFiManager.cpp"
@@ -26,11 +29,11 @@ set(APP_SRCS
     "ui/components/RosterCarousel.cpp"
     "ui/components/PowerStatusBar.cpp"
     "ui/WiFiConfigScreen.cpp"
-    "ui/wifi_config_wrapper.cpp"
+    "ui/wrappers/wifi_config_wrapper.cpp"
     "ui/JmriConfigScreen.cpp"
-    "ui/jmri_config_wrapper.cpp"
+    "ui/wrappers/jmri_config_wrapper.cpp"
     "ui/MainScreen.cpp"
-    "ui/main_screen_wrapper.cpp"
+    "ui/wrappers/main_screen_wrapper.cpp"
 )
 
 set(REQUIRES_LIST)

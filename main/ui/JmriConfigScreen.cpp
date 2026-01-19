@@ -1,5 +1,5 @@
 #include "JmriConfigScreen.h"
-#include "main_screen_wrapper.h"
+#include "wrappers/main_screen_wrapper.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"

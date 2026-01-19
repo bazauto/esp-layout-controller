@@ -1,5 +1,5 @@
 #include "WiFiConfigScreen.h"
-#include "wifi_config_wrapper.h"
+#include "wrappers/wifi_config_wrapper.h"
 #include "esp_log.h"
 #include <algorithm>
 

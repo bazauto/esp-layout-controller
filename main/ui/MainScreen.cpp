@@ -1,6 +1,6 @@
 #include "MainScreen.h"
-#include "wifi_config_wrapper.h"
-#include "jmri_config_wrapper.h"
+#include "wrappers/wifi_config_wrapper.h"
+#include "wrappers/jmri_config_wrapper.h"
 #include "esp_log.h"
 #include "lvgl_port.h"
 
