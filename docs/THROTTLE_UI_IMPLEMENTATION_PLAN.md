@@ -1,7 +1,7 @@
 # Throttle UI & Control Implementation Plan
 
-## Current Status: Phases 1, 2, 4, 6 Complete! 🎉
-**Last Updated:** January 15, 2026
+## Current Status: Phases 1, 2, 3, 4, 5, 6 Complete! 🎉
+**Last Updated:** January 21, 2026
 
 ✅ **Completed:**
 - Phase 1: Core State Management (Knob & Throttle state machines)
@@ -12,8 +12,7 @@
 - Speed control now works correctly via notifications!
 
 🔄 **Next Up:**
-- Phase 3: Roster Selection Overlay (carousel UI for loco selection)
-- Phase 5: Function Panel (F0-F28 buttons)
+- Phase 7: Hardware Integration (rotary encoders)
 
 ---
 
@@ -315,7 +314,7 @@ struct Function {
 5. ✅ Update display to show knob assignment
 6. ✅ Wire up event handlers to ThrottleController
 
-### Phase 3: Roster Selection Overlay 🔄 **NEXT**
+### Phase 3: Roster Selection Overlay ✅ **COMPLETE**
 1. Create carousel container on right side
 2. Implement slide animation for roster scrolling
 3. Hook up to knob rotation events
@@ -328,7 +327,7 @@ struct Function {
 3. ✅ Wire to same event handlers as real hardware will use
 4. [ ] Add compile-time flag to hide when hardware ready
 
-### Phase 5: Function Panel
+### Phase 5: Function Panel ✅ **COMPLETE**
 1. Parse function data from WiThrottle acquire response
 2. Create function button grid overlay
 3. Implement press/release for momentary control
@@ -442,5 +441,5 @@ struct Function {
 ---
 
 **Document Version:** 1.0  
-**Last Updated:** January 14, 2026  
+**Last Updated:** January 21, 2026  
 **Status:** Design Complete - Ready for Implementation

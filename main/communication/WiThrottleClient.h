@@ -95,6 +95,13 @@ public:
      * @param update Throttle update information
      */
     using ThrottleStateCallback = std::function<void(const ThrottleUpdate& update)>;
+
+    /**
+     * @brief Callback for function label updates
+     * @param throttleId Throttle identifier (0-3)
+     * @param labels Function labels (index = function number)
+     */
+    using FunctionLabelsCallback = std::function<void(char throttleId, const std::vector<std::string>& labels)>;
     
     WiThrottleClient();
     ~WiThrottleClient();
@@ -226,6 +233,11 @@ public:
      * @brief Set throttle state change callback
      */
     void setThrottleStateCallback(ThrottleStateCallback callback) { m_throttleCallback = callback; }
+
+    /**
+     * @brief Set function labels callback
+     */
+    void setFunctionLabelsCallback(FunctionLabelsCallback callback) { m_functionLabelsCallback = callback; }
     
     /**
     * @brief Get current roster (not thread-safe; prefer getRosterSnapshot/getRosterEntry)
@@ -304,6 +316,7 @@ private:
     ConnectionStateCallback m_connectionCallback;
     RosterCallback m_rosterCallback;
     WebPortCallback m_webPortCallback;
+    FunctionLabelsCallback m_functionLabelsCallback;
     ThrottleStateCallback m_throttleCallback;
 
     mutable SemaphoreHandle_t m_stateMutex;

@@ -5,6 +5,7 @@
 #include "components/VirtualEncoderPanel.h"
 #include "components/RosterCarousel.h"
 #include "components/PowerStatusBar.h"
+#include "components/FunctionPanel.h"
 #include "../model/Throttle.h"
 #include "../controller/ThrottleController.h"
 #include "../communication/WiThrottleClient.h"
@@ -81,6 +82,7 @@ private:
     lv_obj_t* m_settingsButton;
     std::unique_ptr<PowerStatusBar> m_powerStatusBar;
     std::unique_ptr<RosterCarousel> m_rosterCarousel;
+    std::unique_ptr<FunctionPanel> m_functionPanel;
     
     // Throttle meters (C++ widgets)
     std::array<std::unique_ptr<ThrottleMeter>, 4> m_throttleMeters;
@@ -100,6 +102,8 @@ private:
     static void onFunctionsButtonClicked(lv_event_t* e);
     static void onReleaseButtonClicked(lv_event_t* e);
     static void onUIUpdateNeeded(void* userData);
+    static void onFunctionButtonClicked(lv_event_t* e);
+    static void onFunctionPanelCloseClicked(lv_event_t* e);
     
     // Virtual encoder callbacks
     static void onVirtualEncoderRotation(void* userData, int knobId, int delta);

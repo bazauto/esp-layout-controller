@@ -32,6 +32,11 @@ ThrottleController::ThrottleController(WiThrottleClient* wiThrottleClient)
                 this->onThrottleStateChanged(update);
             }
         );
+        m_wiThrottleClient->setFunctionLabelsCallback(
+            [this](char throttleId, const std::vector<std::string>& labels) {
+                this->onFunctionLabelsReceived(throttleId, labels);
+            }
+        );
     }
 
     m_stateMutex = xSemaphoreCreateMutex();
@@ -324,8 +329,7 @@ void ThrottleController::onThrottleFunctions(int throttleId)
 {
     if (throttleId < 0 || throttleId >= NUM_THROTTLES) return;
     
-    ESP_LOGI(TAG, "Functions button pressed for throttle %d (not yet implemented)", throttleId);
-    // TODO: Phase 5 - Open function panel overlay
+    ESP_LOGI(TAG, "Functions button pressed for throttle %d", throttleId);
 }
 
 Throttle* ThrottleController::getThrottle(int throttleId)
@@ -456,6 +460,55 @@ bool ThrottleController::getRosterSelectionSnapshot(RosterSelectionSnapshot& out
     return true;
 }
 
+bool ThrottleController::getFunctionsSnapshot(int throttleId, std::vector<Function>& outFunctions) const
+{
+    if (throttleId < 0 || throttleId >= NUM_THROTTLES) {
+        return false;
+    }
+
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        return false;
+    }
+
+    const Throttle* throttle = m_throttles[throttleId].get();
+    if (!throttle) {
+        unlockState();
+        return false;
+    }
+
+    outFunctions = throttle->getFunctions();
+    unlockState();
+    return true;
+}
+
+bool ThrottleController::getFunctionState(int throttleId, int functionNumber, bool& outState) const
+{
+    if (throttleId < 0 || throttleId >= NUM_THROTTLES) {
+        return false;
+    }
+
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        return false;
+    }
+
+    const Throttle* throttle = m_throttles[throttleId].get();
+    if (!throttle) {
+        unlockState();
+        return false;
+    }
+
+    for (const auto& func : throttle->getFunctions()) {
+        if (func.number == functionNumber) {
+            outState = func.state;
+            unlockState();
+            return true;
+        }
+    }
+
+    unlockState();
+    return false;
+}
+
 void ThrottleController::sendSpeedCommand(int throttleId, int speed)
 {
     // '0' + throttleId gives '0', '1', '2', or '3' - used to convert to char
@@ -516,6 +569,43 @@ void ThrottleController::onThrottleStateChanged(const WiThrottleClient::Throttle
     unlockState();
 
     // Update UI to reflect changes
+    updateUI();
+}
+
+void ThrottleController::onFunctionLabelsReceived(char throttleIdChar, const std::vector<std::string>& labels)
+{
+    int throttleId = throttleIdChar - '0';
+    if (throttleId < 0 || throttleId >= NUM_THROTTLES) {
+        ESP_LOGW(TAG, "Invalid throttle ID for function labels: %c", throttleIdChar);
+        return;
+    }
+
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Failed to lock state for function labels");
+        return;
+    }
+
+    Throttle* throttle = m_throttles[throttleId].get();
+    if (!throttle) {
+        unlockState();
+        return;
+    }
+
+    std::vector<Function> existing = throttle->getFunctions();
+    throttle->clearFunctions();
+    for (size_t i = 0; i < labels.size(); ++i) {
+        bool state = false;
+        for (const auto& func : existing) {
+            if (func.number == static_cast<int>(i)) {
+                state = func.state;
+                break;
+            }
+        }
+        Function function(static_cast<int>(i), labels[i], state);
+        throttle->addFunction(function);
+    }
+
+    unlockState();
     updateUI();
 }
 

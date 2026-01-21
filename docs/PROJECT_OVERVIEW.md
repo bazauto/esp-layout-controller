@@ -5,7 +5,7 @@
 - **[THROTTLE_UI_IMPLEMENTATION_PLAN.md](./THROTTLE_UI_IMPLEMENTATION_PLAN.md)**: Implementation phases and state machines
 - **[WITHROTTLE_PROTOCOL.md](./WITHROTTLE_PROTOCOL.md)**: WiThrottle protocol reference
 
-## Current Status: Phases 1, 2, 4, 6 Complete!
+## Current Status: Phases 1, 2, 3, 4, 5, 6 Complete!
 ✅ **Completed:**
 - **Architecture**: Layered design with application-layer state management
 - **UI**: 4 throttle meters, virtual encoder panel, settings screens
@@ -17,10 +17,8 @@
 
 🔄 **In Progress:**
 - Testing speed control with periodic state polling (JMRI quirks workaround)
-- Roster selection overlay (Phase 3)
 
 ⏭️ **Next Steps:**
-- Function panel implementation (Phase 5)
 - Hardware encoder integration when available (Phase 7)
 
 **See [THROTTLE_UI_IMPLEMENTATION_PLAN.md](./THROTTLE_UI_IMPLEMENTATION_PLAN.md) for detailed phase breakdown.**
@@ -94,8 +92,8 @@
 
 ## Technical Architecture
 
-### Code Organization
-- **Language**: C++ (migration from current C code)
+### Code Organisation
+- **Language**: C++ (migration now complete; C is limited to hardware/LVGL bootstrapping)
 - **Structure**: Class-based OOP design
 - **Encapsulation**: Separate classes for different subsystems
 

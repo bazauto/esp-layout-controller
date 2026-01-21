@@ -111,10 +111,20 @@ void Throttle::setFunctionState(int functionNumber, bool state)
             return;
         }
     }
+
+    m_functions.emplace_back(functionNumber, "", state);
 }
 
 void Throttle::addFunction(const Function& function)
 {
+    for (auto& existing : m_functions) {
+        if (existing.number == function.number) {
+            existing.label = function.label;
+            existing.state = function.state;
+            return;
+        }
+    }
+
     m_functions.push_back(function);
 }
 

@@ -22,6 +22,7 @@ WiThrottleClient::WiThrottleClient()
     , m_connectionCallback(nullptr)
     , m_rosterCallback(nullptr)
     , m_webPortCallback(nullptr)
+    , m_functionLabelsCallback(nullptr)
     , m_stateMutex(nullptr)
     , m_receiveTaskHandle(nullptr)
     , m_running(false)
@@ -348,7 +349,8 @@ esp_err_t WiThrottleClient::setFunction(char throttleId, int function, bool stat
                          "A" + std::string(1, throttleState.addressType) + std::to_string(throttleState.address) +
                          "<;>F" + (state ? "1" : "0") + std::to_string(function);
     
-    ESP_LOGD(TAG, "Setting throttle %c function F%d: %s", throttleId, function, state ? "ON" : "OFF");
+    ESP_LOGI(TAG, "Sending function command: throttle %c F%d -> %s", throttleId, function, state ? "ON" : "OFF");
+    ESP_LOGD(TAG, "Function command payload: %s", command.c_str());
     
     return sendCommand(command);
 }
@@ -781,6 +783,45 @@ void WiThrottleClient::handleThrottleMessage(const std::string& message)
     char throttleId = message[1];  // '0', '1', '2', '3'
     char command = message[2];     // 'A' = action, '+' = add, '-' = remove, 'L' = labels
     
+    if (command == 'L') {
+        size_t delimPos = message.find("<;>");
+        if (delimPos == std::string::npos) {
+            ESP_LOGW(TAG, "Throttle label message missing delimiter: %s", message.c_str());
+            return;
+        }
+
+        std::string data = message.substr(delimPos + 3);
+        std::vector<std::string> labels;
+
+        const std::string delimiter = "]\\[";
+        size_t pos = 0;
+        if (data.rfind(delimiter, 0) == 0) {
+            pos = delimiter.size();
+        }
+
+        while (pos <= data.length()) {
+            size_t next = data.find(delimiter, pos);
+            if (next == std::string::npos) {
+                labels.push_back(data.substr(pos));
+                break;
+            }
+            labels.push_back(data.substr(pos, next - pos));
+            pos = next + delimiter.size();
+        }
+
+        if (labels.size() < 29) {
+            labels.resize(29);
+        }
+        if (labels.size() > 29) {
+            labels.resize(29);
+        }
+
+        if (m_functionLabelsCallback) {
+            m_functionLabelsCallback(throttleId, labels);
+        }
+        return;
+    }
+
     // We only care about 'A' (action) messages for state updates
     if (command != 'A') {
         ESP_LOGD(TAG, "Ignoring non-action throttle message: %s", message.c_str());
@@ -838,9 +879,9 @@ void WiThrottleClient::handleThrottleMessage(const std::string& message)
             
         case 'F':  // Function
             if (data.length() > 2) {
-                // Format: F<number><state>  e.g., F00, F15, F11
-                int funcNum = std::atoi(data.substr(1, 2).c_str());
-                bool funcState = (data[data.length() - 1] == '1');
+                // Format: F<state><function> e.g., F10 (F0 on), F110 (F10 on)
+                bool funcState = (data[1] == '1');
+                int funcNum = std::atoi(data.substr(2).c_str());
                 update.function = funcNum;
                 update.functionState = funcState;
                 ESP_LOGD(TAG, "Throttle %c function %d: %s", throttleId, funcNum, funcState ? "on" : "off");

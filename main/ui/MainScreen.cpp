@@ -3,6 +3,7 @@
 #include "wrappers/jmri_config_wrapper.h"
 #include "esp_log.h"
 #include "lvgl_port.h"
+#include <vector>
 
 extern "C" {
     bool lvgl_port_lock(int timeout_ms);
@@ -22,6 +23,9 @@ MainScreen::MainScreen()
     , m_settingsButton(nullptr)
     , m_powerStatusBar(nullptr)
     , m_rosterCarousel(nullptr)
+    , m_functionPanel(nullptr)
+    , m_virtualEncoderPanel(nullptr)
+    , m_throttleController(nullptr)
     , m_wiThrottleClient(nullptr)
     , m_jmriClient(nullptr)
 {
@@ -111,6 +115,13 @@ void MainScreen::createRightPanel()
     // Roster selection carousel
     m_rosterCarousel = std::make_unique<RosterCarousel>();
     m_rosterCarousel->create(m_rightPanel);
+
+    // Function panel overlay (hidden by default)
+    m_functionPanel = std::make_unique<FunctionPanel>();
+    lv_obj_t* functionPanelObj = m_functionPanel->create(m_rightPanel, onFunctionPanelCloseClicked, this);
+    lv_obj_add_flag(functionPanelObj, LV_OBJ_FLAG_FLOATING);
+    lv_obj_align(functionPanelObj, LV_ALIGN_TOP_MID, 0, 0);
+    m_functionPanel->setFunctionCallback(onFunctionButtonClicked, this);
     
     // Virtual encoder panel for testing
     m_virtualEncoderPanel = std::make_unique<VirtualEncoderPanel>();
@@ -248,6 +259,13 @@ void MainScreen::updateAllThrottles()
 
     if (m_rosterCarousel) {
         m_rosterCarousel->update(m_throttleController);
+    }
+
+    if (m_functionPanel && m_functionPanel->isVisible() && m_throttleController) {
+        std::vector<Function> functions;
+        if (m_throttleController->getFunctionsSnapshot(m_functionPanel->getThrottleId(), functions)) {
+            m_functionPanel->updateFunctions(functions);
+        }
     }
 }
 Throttle* MainScreen::getThrottle(int throttleId)
@@ -403,8 +421,63 @@ void MainScreen::onFunctionsButtonClicked(lv_event_t* e)
     
     if (throttleId >= 0) {
         ESP_LOGI(TAG, "Functions button clicked on throttle %d", throttleId);
-        screen->m_throttleController->onThrottleFunctions(throttleId);
+        std::vector<Function> functions;
+        if (!screen->m_throttleController->getFunctionsSnapshot(throttleId, functions)) {
+            return;
+        }
+
+        ThrottleController::ThrottleSnapshot snapshot;
+        screen->m_throttleController->getThrottleSnapshot(throttleId, snapshot);
+        if (!snapshot.hasLocomotive) {
+            return;
+        }
+
+        if (functions.empty()) {
+            for (int i = 0; i <= 28; ++i) {
+                bool state = false;
+                screen->m_throttleController->getFunctionState(throttleId, i, state);
+                functions.emplace_back(i, "", state);
+            }
+        }
+        if (screen->m_functionPanel) {
+            screen->m_functionPanel->show(throttleId, snapshot.locoName, functions);
+        }
     }
+}
+
+void MainScreen::onFunctionPanelCloseClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    if (screen && screen->m_functionPanel) {
+        screen->m_functionPanel->hide();
+    }
+}
+
+void MainScreen::onFunctionButtonClicked(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    if (!screen || !screen->m_functionPanel || !screen->m_throttleController || !screen->m_wiThrottleClient) {
+        return;
+    }
+
+    if (!screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGW(TAG, "WiThrottle not connected");
+        return;
+    }
+
+    lv_obj_t* button = lv_event_get_target(e);
+    int functionNumber = static_cast<int>(reinterpret_cast<intptr_t>(lv_obj_get_user_data(button)));
+    int throttleId = screen->m_functionPanel->getThrottleId();
+
+    lv_event_code_t code = lv_event_get_code(e);
+    bool newState = (code == LV_EVENT_PRESSED);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_RELEASED) {
+        return;
+    }
+
+    screen->m_wiThrottleClient->setFunction('0' + throttleId, functionNumber, newState);
+
+    // Wait for WiThrottle updates to drive UI state
 }
 
 void MainScreen::onReleaseButtonClicked(lv_event_t* e)
@@ -439,11 +512,16 @@ void MainScreen::onUIUpdateNeeded(void* userData)
     if (screen) {
         // CRITICAL: Lock LVGL mutex before accessing LVGL objects
         // This callback may be called from WiThrottle network task
-        if (lvgl_port_lock(100)) {
+        if (lvgl_port_lock(200)) {
             screen->updateAllThrottles();
             lvgl_port_unlock();
         } else {
-            ESP_LOGW(TAG, "Failed to acquire LVGL lock for UI update");
+            static int64_t lastWarnMs = 0;
+            int64_t nowMs = esp_log_timestamp();
+            if (nowMs - lastWarnMs > 1000) {
+                ESP_LOGW(TAG, "Failed to acquire LVGL lock for UI update");
+                lastWarnMs = nowMs;
+            }
         }
     }
 }

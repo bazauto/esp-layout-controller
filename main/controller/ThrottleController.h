@@ -107,6 +107,16 @@ public:
      * @return true if snapshot was captured
      */
     bool getRosterSelectionSnapshot(RosterSelectionSnapshot& outSnapshot) const;
+
+    /**
+     * @brief Get a snapshot of function data for a throttle
+     */
+    bool getFunctionsSnapshot(int throttleId, std::vector<Function>& outFunctions) const;
+
+    /**
+     * @brief Get a specific function state
+     */
+    bool getFunctionState(int throttleId, int functionNumber, bool& outState) const;
     
     /**
      * @brief Get knob model
@@ -150,6 +160,8 @@ private:
     // WiThrottle callback handlers
     void onThrottleStateChanged(const WiThrottleClient::ThrottleUpdate& update);
     static void throttleStateCallbackWrapper(void* userData, const WiThrottleClient::ThrottleUpdate& update);
+
+    void onFunctionLabelsReceived(char throttleId, const std::vector<std::string>& labels);
     
     // Polling for state synchronization
     void pollThrottleStates();
