@@ -326,16 +326,15 @@ void onNetworkCallback(void* userData) {
 - [x] ThrottleController coordination layer
 - [x] UI update callbacks
 - [x] Locomotive model with roster compatibility
-- [ ] Virtual encoder testing UI (buttons to simulate rotation/press) **← NEXT**
-- [ ] Test complete throttle selection flow
+- [x] Virtual encoder testing UI (buttons to simulate rotation/press)
+- [x] Test complete throttle selection flow
 
-### Phase 3: Hardware Integration
-- [ ] Research Adafruit I2C QT Rotary Encoder library/datasheet
-- [ ] I2C rotary encoder driver implementation (addresses 0x76, 0x77)
-- [ ] Encoder input handling with callbacks
-- [ ] Button debouncing and event system
+### Phase 3: Hardware Integration 🚧 **IN PROGRESS**
+- [x] Research Adafruit I2C QT Rotary Encoder library/datasheet
+- [x] I2C rotary encoder driver implementation (addresses 0x76, 0x77)
+- [x] Encoder input handling with callbacks (delta-based)
+- [ ] Button handling validation (press stability)
 - [ ] Hardware testing utilities
-- [ ] ⏳ **BLOCKED**: Waiting for LTC4316 address translator hardware
 
 ### Phase 4: WiThrottle Protocol
 - [x] Research WiThrottle protocol specification (see WITHROTTLE_PROTOCOL.md)

@@ -42,6 +42,7 @@ public:
     void setFunctionCallback(lv_event_cb_t callback, void* userData);
 
     bool isVisible() const;
+    bool isScrolling() const;
     int getThrottleId() const { return m_throttleId; }
 
 private:

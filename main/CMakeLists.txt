@@ -11,6 +11,9 @@ set(APP_SRCS
     "model/Throttle.cpp"
     "model/Roster.cpp"
     "model/Knob.cpp"
+
+    # Hardware layer (C++)
+    "hardware/RotaryEncoderHal.cpp"
     
     # Controller layer (C++)
     "controller/ThrottleController.cpp"

@@ -19,12 +19,14 @@ lv_obj_t* FunctionPanel::create(lv_obj_t* parent, lv_event_cb_t closeCallback, v
     lv_obj_set_flex_align(m_panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_all(m_panel, 8, 0);
     lv_obj_set_style_pad_row(m_panel, 6, 0);
+    lv_obj_set_scroll_dir(m_panel, LV_DIR_NONE);
 
     lv_obj_t* header = lv_obj_create(m_panel);
     lv_obj_remove_style_all(header);
     lv_obj_set_size(header, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(header, LV_DIR_NONE);
 
     m_titleLabel = lv_label_create(header);
     lv_label_set_text(m_titleLabel, "Functions");
@@ -45,6 +47,11 @@ lv_obj_t* FunctionPanel::create(lv_obj_t* parent, lv_event_cb_t closeCallback, v
     lv_obj_set_style_pad_row(m_buttonsContainer, 6, 0);
     lv_obj_set_style_pad_column(m_buttonsContainer, 6, 0);
     lv_obj_set_scroll_dir(m_buttonsContainer, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(m_buttonsContainer, LV_SCROLLBAR_MODE_ACTIVE);
+    lv_obj_set_style_width(m_buttonsContainer, 12, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(m_buttonsContainer, LV_OPA_60, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(m_buttonsContainer, lv_palette_main(LV_PALETTE_BLUE), LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_right(m_buttonsContainer, 16, 0);
 
     lv_obj_add_flag(m_panel, LV_OBJ_FLAG_HIDDEN);
     return m_panel;
@@ -104,8 +111,8 @@ void FunctionPanel::rebuildButtons(const std::vector<Function>& functions)
     m_lastLabels.clear();
 
     for (const auto& func : functions) {
-        lv_obj_t* btn = lv_btn_create(m_buttonsContainer);
-        lv_obj_set_size(btn, 100, 50);
+    lv_obj_t* btn = lv_btn_create(m_buttonsContainer);
+    lv_obj_set_size(btn, 85, 52);
         lv_obj_set_user_data(btn, reinterpret_cast<void*>(static_cast<intptr_t>(func.number)));
 
         if (m_functionCallback) {

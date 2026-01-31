@@ -60,11 +60,11 @@ The connection between ESP Board and the LCD is as follows:
 
 ### Configure the Project
 
-**Note for Windows users:** In a fresh PowerShell terminal, you must run the ESP-IDF export script before using `idf.py`:
+**Note for Windows users:** In a fresh PowerShell terminal, run the helper that only executes the ESP-IDF export if needed:
 ```powershell
-..\esp-idf\v5.5.2\esp-idf\export.ps1
+.\tools\ensure-idf.ps1
 ```
-This sets up the ESP-IDF environment variables and makes `idf.py` available in your terminal.
+This sets up the ESP-IDF environment variables (or skips if already initialised) and makes `idf.py` available in your terminal.
 
 Run `idf.py menuconfig` and navigate to `Example Configuration` menu.
 
@@ -72,7 +72,7 @@ Run `idf.py menuconfig` and navigate to `Example Configuration` menu.
 
 Run `idf.py set-target esp32s3` to select the target chip.
 
-Run `idf.py -p PORT build flash monitor` to build, flash and monitor the project. A fancy animation will show up on the LCD as expected.
+Run `.\tools\ensure-idf.ps1; idf.py -p PORT build flash monitor` to build, flash and monitor the project. A fancy animation will show up on the LCD as expected.
 
 The first time you run `idf.py` for the example will cost extra time as the build system needs to address the component dependencies and downloads the missing components from registry into `managed_components` folder.
 
@@ -83,7 +83,7 @@ The first time you run `idf.py` for the example will cost extra time as the buil
 The default build runs the UI. To run unit tests without changing `menuconfig`, use a separate build directory and a test-specific sdkconfig file:
 
 ```powershell
-idf.py -B build-tests -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test.defaults" -D SDKCONFIG="build-tests/sdkconfig" test
+.\tools\ensure-idf.ps1; idf.py -B build-tests -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test.defaults" -D SDKCONFIG="build-tests/sdkconfig" test
 ```
 
 Using a dedicated build directory avoids reusing the normal `sdkconfig` values. If you already ran tests once, delete `build-tests` to force a clean config.

@@ -25,6 +25,11 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     m_knobAvailable[0] = true;
     m_knobAvailable[1] = true;
     m_forwardDirection = true;
+    m_lastDisplayedValue = m_value;
+    m_lastUnitText.clear();
+    m_lastLocoName.clear();
+    m_lastLocoAddress = 0;
+    m_hasLoco = false;
     // Create container
     m_container = lv_obj_create(parent);
     lv_obj_remove_style_all(m_container);
@@ -98,7 +103,12 @@ void ThrottleMeter::setValue(int32_t value)
     // Clamp to range
     if (value < m_min) value = m_min;
     if (value > m_max) value = m_max;
-    
+
+    if (value == m_lastDisplayedValue) {
+        m_value = value;
+        return;
+    }
+
     m_value = value;
     
     if (m_needle) {
@@ -108,6 +118,8 @@ void ThrottleMeter::setValue(int32_t value)
     if (m_valueLabel) {
         lv_label_set_text_fmt(m_valueLabel, "%" LV_PRId32, value);
     }
+
+    m_lastDisplayedValue = value;
 }
 
 void ThrottleMeter::setScale(float scale)
@@ -147,10 +159,17 @@ void ThrottleMeter::setUnit(const char* unit)
     if (!unit) {
         return;
     }
-    
-    if (m_unitLabel) {
-        lv_label_set_text(m_unitLabel, unit);
+
+    std::string unitText(unit);
+    if (unitText == m_lastUnitText) {
+        return;
     }
+
+    if (m_unitLabel) {
+        lv_label_set_text(m_unitLabel, unitText.c_str());
+    }
+
+    m_lastUnitText = std::move(unitText);
 }
 
 void ThrottleMeter::startAnimation(uint32_t timeMs, uint32_t playbackMs)
@@ -200,18 +219,18 @@ void ThrottleMeter::animationCallback(void* var, int32_t value)
 
 void ThrottleMeter::createKnobIndicators()
 {
-    // Create L and R indicators at the bottom corners of the meter
-    const char* labels[2] = {"L", "R"};
-    
+    // Create K1 and K2 indicators at the bottom corners of the meter
+    const char* labels[2] = {"K1", "K2"};
+
     for (int i = 0; i < 2; i++) {
         m_knobIndicators[i] = lv_btn_create(m_meter);
         lv_obj_set_size(m_knobIndicators[i], 40, 30);
         lv_obj_align(m_knobIndicators[i], i == 0 ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, i == 0 ? 5 : -5, -5);
-        
+
         lv_obj_t* label = lv_label_create(m_knobIndicators[i]);
         lv_label_set_text(label, labels[i]);
         lv_obj_center(label);
-        
+
         // Store knob ID in user data
         lv_obj_set_user_data(m_knobIndicators[i], (void*)(intptr_t)i);
     }
@@ -283,9 +302,21 @@ void ThrottleMeter::updateKnobIndicators()
 
 void ThrottleMeter::setLocomotive(const char* name, int address)
 {
+    if (!name) {
+        return;
+    }
+
+    if (m_hasLoco && m_lastLocoName == name && m_lastLocoAddress == address) {
+        return;
+    }
+
     char buf[64];
     lv_snprintf(buf, sizeof(buf), "%s (#%d)", name, address);
     lv_label_set_text(m_locoLabel, buf);
+
+    m_lastLocoName = name;
+    m_lastLocoAddress = address;
+    m_hasLoco = true;
     
     // Show buttons when loco is assigned
     lv_obj_clear_flag(m_functionsButton, LV_OBJ_FLAG_HIDDEN);
@@ -294,7 +325,15 @@ void ThrottleMeter::setLocomotive(const char* name, int address)
 
 void ThrottleMeter::clearLocomotive()
 {
+    if (!m_hasLoco) {
+        return;
+    }
+
     lv_label_set_text(m_locoLabel, "");
+
+    m_lastLocoName.clear();
+    m_lastLocoAddress = 0;
+    m_hasLoco = false;
     
     // Hide buttons when no loco
     lv_obj_add_flag(m_functionsButton, LV_OBJ_FLAG_HIDDEN);
@@ -327,6 +366,10 @@ void ThrottleMeter::setKnobTouchCallback(lv_event_cb_t callback, void* userData)
 
 void ThrottleMeter::setDirection(bool forward)
 {
+    if (m_forwardDirection == forward) {
+        return;
+    }
+
     m_forwardDirection = forward;
 
     if (!m_directionIndicator) {

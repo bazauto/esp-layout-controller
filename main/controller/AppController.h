@@ -8,6 +8,7 @@ class ThrottleController;
 class MainScreen;
 class WiFiController;
 class JmriConnectionController;
+class RotaryEncoderHal;
 
 /**
  * @brief Application-level controller that owns shared state and services.
@@ -31,6 +32,7 @@ public:
     WiThrottleClient* getWiThrottleClient() const;
     WiFiController* getWiFiController() const;
     JmriConnectionController* getJmriConnectionController() const;
+    RotaryEncoderHal* getRotaryEncoderHal() const;
 
 private:
     AppController();
@@ -41,5 +43,6 @@ private:
     std::unique_ptr<ThrottleController> m_throttleController;
     std::unique_ptr<WiFiController> m_wifiController;
     std::unique_ptr<JmriConnectionController> m_jmriConnectionController;
+    std::unique_ptr<RotaryEncoderHal> m_rotaryEncoderHal;
     bool m_initialised;
 };

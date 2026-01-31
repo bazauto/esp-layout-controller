@@ -334,6 +334,7 @@ struct Function {
 4. Send F1<n> on press, F0<n> on release
 5. Show current state (on/off indicators)
 6. Close button to exit
+  - **Note:** Function controls must use press/release events to support both momentary and stable functions.
 
 ### Phase 6: Throttle Change Notifications ✅ **COMPLETE**
 1. ✅ Parse async throttle state messages from WiThrottle
@@ -345,10 +346,10 @@ struct Function {
    - Notification handler kept for functions and opportunistic speed updates
 
 ### Phase 7: Hardware Integration
-1. Implement rotary encoder I2C driver
-2. Map encoder events to knob state machine
-3. Remove/hide virtual knobs
-4. Test with real hardware
+1. ✅ Implement rotary encoder I2C driver (Seesaw delta)
+2. ✅ Map encoder events to knob state machine
+3. [ ] Remove/hide virtual knobs
+4. 🚧 Test with real hardware (button stability pending)
 
 ---
 

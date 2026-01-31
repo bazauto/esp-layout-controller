@@ -131,16 +131,6 @@ Current Phase: Core functionality complete, testing with virtual encoders.
 - I'll help create test code for new features
 - We'll use debug outputs and visual feedback for testing
 
-## Current Phase
-We are at the beginning of Phase 2: Planning complete, starting C++ migration and class structure definition.
-
-## Next Immediate Steps
-1. Answer questions in PROJECT_OVERVIEW.md
-2. Create base class structure
-3. Migrate existing code to C++
-4. Implement rotary encoder driver
-5. Begin WiThrottle client
-
 ## Remember
 - **Ask questions** when details are unclear
 - **Keep it simple** - don't over-engineer
@@ -153,3 +143,5 @@ We are at the beginning of Phase 2: Planning complete, starting C++ migration an
 - **Honesty about uncertainties** - if unsure, let's discuss before proceeding, be brutally honest about what you don't know
 - **Honest reviews** - if code doesn't meet standards, point it out clearly, suggest improvements and when I ask for changes, be honest about feasibility and implications
 - **Always** use British English spelling conventions
+- **Stay up to date** with project changes by reviewing recent edits before making suggestions
+- **Keep it concise** - avoid unnecessary verbosity

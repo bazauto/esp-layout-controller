@@ -24,7 +24,9 @@ MainScreen::MainScreen()
     , m_powerStatusBar(nullptr)
     , m_rosterCarousel(nullptr)
     , m_functionPanel(nullptr)
+#if ENABLE_VIRTUAL_ENCODER
     , m_virtualEncoderPanel(nullptr)
+#endif
     , m_throttleController(nullptr)
     , m_wiThrottleClient(nullptr)
     , m_jmriClient(nullptr)
@@ -103,10 +105,10 @@ void MainScreen::createRightPanel()
     m_rightPanel = lv_obj_create(lv_obj_get_parent(m_leftPanel));
     lv_obj_set_grid_cell(m_rightPanel, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
     lv_obj_set_flex_flow(m_rightPanel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(m_rightPanel, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(m_rightPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_all(m_rightPanel, 10, 0);
     lv_obj_set_style_pad_row(m_rightPanel, 10, 0);
-    lv_obj_set_style_pad_bottom(m_rightPanel, 70, 0);
+    lv_obj_set_style_pad_bottom(m_rightPanel, 10, 0);
     
     // Add track power controls at the top
     m_powerStatusBar = std::make_unique<PowerStatusBar>();
@@ -120,15 +122,25 @@ void MainScreen::createRightPanel()
     m_functionPanel = std::make_unique<FunctionPanel>();
     lv_obj_t* functionPanelObj = m_functionPanel->create(m_rightPanel, onFunctionPanelCloseClicked, this);
     lv_obj_add_flag(functionPanelObj, LV_OBJ_FLAG_FLOATING);
-    lv_obj_align(functionPanelObj, LV_ALIGN_TOP_MID, 0, 0);
+    static const int FUNCTION_PANEL_TOP = 65;
+    static const int FUNCTION_PANEL_BOTTOM = 60;
+    int functionPanelHeight = SCREEN_HEIGHT - FUNCTION_PANEL_TOP - FUNCTION_PANEL_BOTTOM;
+    if (functionPanelHeight < 150) {
+        functionPanelHeight = 150;
+    }
+    lv_obj_set_height(functionPanelObj, functionPanelHeight);
+    lv_obj_set_width(functionPanelObj, LV_PCT(95));
+    lv_obj_align(functionPanelObj, LV_ALIGN_TOP_MID, 0, FUNCTION_PANEL_TOP);
     m_functionPanel->setFunctionCallback(onFunctionButtonClicked, this);
     
+#if ENABLE_VIRTUAL_ENCODER
     // Virtual encoder panel for testing
     m_virtualEncoderPanel = std::make_unique<VirtualEncoderPanel>();
-    m_virtualEncoderPanel->create(m_rightPanel, 
+    m_virtualEncoderPanel->create(m_rightPanel,
                                   onVirtualEncoderRotation,
                                   onVirtualEncoderPress,
                                   this);
+#endif
 }
 
 void MainScreen::createThrottleMeters()
@@ -171,7 +183,7 @@ void MainScreen::createSettingsButton()
 {
     // Settings button in bottom-right corner
     m_settingsButton = lv_btn_create(m_screen);
-    lv_obj_set_size(m_settingsButton, 80, 50);
+    lv_obj_set_size(m_settingsButton, 70, 40);
     lv_obj_align(m_settingsButton, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
     lv_obj_add_event_cb(m_settingsButton, onSettingsButtonClicked, LV_EVENT_CLICKED, this);
     
@@ -182,14 +194,15 @@ void MainScreen::createSettingsButton()
     
     // JMRI button next to settings button
     lv_obj_t* jmriButton = lv_btn_create(m_screen);
-    lv_obj_set_size(jmriButton, 80, 50);
-    lv_obj_align(jmriButton, LV_ALIGN_BOTTOM_RIGHT, -100, -10);
+    lv_obj_set_size(jmriButton, 70, 40);
+    lv_obj_align(jmriButton, LV_ALIGN_BOTTOM_RIGHT, -90, -10);
     lv_obj_add_event_cb(jmriButton, onJmriButtonClicked, LV_EVENT_CLICKED, this);
     
     // Add settings icon
     lv_obj_t* jmriLabel = lv_label_create(jmriButton);
     lv_label_set_text(jmriLabel, LV_SYMBOL_SETTINGS);
     lv_obj_center(jmriLabel);
+
 }
 
 void MainScreen::onJmriButtonClicked(lv_event_t* e)
@@ -238,6 +251,11 @@ void MainScreen::updateThrottle(int throttleId)
     // Update knob assignment indicators
     int assignedKnob = snapshot.assignedKnob;
     meter->setAssignedKnob(assignedKnob);
+
+    // Hide function panel when entering roster selection
+    if (snapshot.state == Throttle::State::SELECTING && m_functionPanel && m_functionPanel->isVisible()) {
+        m_functionPanel->hide();
+    }
 
     // Update knob availability (disable indicator if other knob is active)
     if (assignedKnob >= 0) {

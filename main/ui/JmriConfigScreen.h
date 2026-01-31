@@ -17,9 +17,15 @@
  * 
  * Settings are persisted in NVS and auto-connect at startup
  */
+class WiFiController;
+class RotaryEncoderHal;
+
 class JmriConfigScreen {
 public:
-    explicit JmriConfigScreen(JmriJsonClient& jsonClient, WiThrottleClient& wiThrottleClient);
+    explicit JmriConfigScreen(JmriJsonClient& jsonClient,
+                              WiThrottleClient& wiThrottleClient,
+                              WiFiController* wifiController,
+                              RotaryEncoderHal* encoderHal);
     ~JmriConfigScreen();
     
     // Delete copy/move
@@ -40,8 +46,11 @@ public:
 private:
     void createStatusSection(lv_obj_t* parent);
     void createConfigSection(lv_obj_t* parent);
+    void createSystemStatusSection(lv_obj_t* parent);
     void createButtonSection(lv_obj_t* parent);
     void createKeyboard();
+
+    void addStatusRow(lv_obj_t* parent, const char* label, lv_obj_t** valueLabel);
     
     void showKeyboard(lv_obj_t* textarea);
     void hideKeyboard();
@@ -64,12 +73,17 @@ private:
     
     // LVGL objects
     lv_obj_t* m_screen;
-    lv_obj_t* m_jsonStatusLabel;
-    lv_obj_t* m_wiThrottleStatusLabel;
     lv_obj_t* m_serverIpInput;
     lv_obj_t* m_wiThrottlePortInput;
     lv_obj_t* m_powerManagerInput;
     lv_obj_t* m_speedStepsInput;
+    lv_obj_t* m_statusWifiValue;
+    lv_obj_t* m_statusWiThrottleValue;
+    lv_obj_t* m_statusJsonValue;
+    lv_obj_t* m_statusEncoder1Value;
+    lv_obj_t* m_statusEncoder2Value;
+    lv_obj_t* m_statusSoftwareValue;
+    lv_obj_t* m_statusHardwareValue;
     lv_obj_t* m_connectButton;
     lv_obj_t* m_disconnectButton;
     lv_obj_t* m_backButton;
@@ -79,10 +93,13 @@ private:
     // Client references
     JmriJsonClient& m_jsonClient;
     WiThrottleClient& m_wiThrottleClient;
+    WiFiController* m_wifiController;
+    RotaryEncoderHal* m_encoderHal;
     
     // Constants
     static constexpr int SCREEN_WIDTH = 800;
     static constexpr int SCREEN_HEIGHT = 480;
     static constexpr int PADDING = 10;
     static constexpr int BUTTON_HEIGHT = 50;
+    static constexpr int STATUS_ROW_HEIGHT = 26;
 };

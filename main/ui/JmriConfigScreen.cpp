@@ -1,6 +1,10 @@
 #include "JmriConfigScreen.h"
 #include "wrappers/main_screen_wrapper.h"
 #include "esp_log.h"
+#include "../controller/WiFiController.h"
+#include "../hardware/RotaryEncoderHal.h"
+#include "esp_app_desc.h"
+#include "esp_chip_info.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "lvgl_port.h"
@@ -20,13 +24,22 @@ static const char* NVS_KEY_WITHROTTLE_PORT = "wt_port";
 static const char* NVS_KEY_POWER_MANAGER = "power_mgr";
 static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 
-JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient, WiThrottleClient& wiThrottleClient)
+JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
+                                   WiThrottleClient& wiThrottleClient,
+                                   WiFiController* wifiController,
+                                   RotaryEncoderHal* encoderHal)
     : m_screen(nullptr)
-    , m_jsonStatusLabel(nullptr)
-    , m_wiThrottleStatusLabel(nullptr)
     , m_serverIpInput(nullptr)
     , m_wiThrottlePortInput(nullptr)
     , m_powerManagerInput(nullptr)
+        , m_speedStepsInput(nullptr)
+    , m_statusWifiValue(nullptr)
+    , m_statusWiThrottleValue(nullptr)
+    , m_statusJsonValue(nullptr)
+    , m_statusEncoder1Value(nullptr)
+    , m_statusEncoder2Value(nullptr)
+    , m_statusSoftwareValue(nullptr)
+    , m_statusHardwareValue(nullptr)
     , m_connectButton(nullptr)
     , m_disconnectButton(nullptr)
     , m_backButton(nullptr)
@@ -34,6 +47,8 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient, WiThrottleClient&
     , m_keyboardLabel(nullptr)
     , m_jsonClient(jsonClient)
     , m_wiThrottleClient(wiThrottleClient)
+    , m_wifiController(wifiController)
+    , m_encoderHal(encoderHal)
 {
 }
 
@@ -49,7 +64,7 @@ lv_obj_t* JmriConfigScreen::create()
     lv_obj_set_style_bg_color(m_screen, lv_color_hex(0x000000), 0);
     
     // Button container height
-    const int buttonAreaHeight = BUTTON_HEIGHT + 3 * PADDING;
+    const int buttonAreaHeight = BUTTON_HEIGHT + 2 * PADDING;
     
     // Create scrollable content container
     lv_obj_t* scrollContainer = lv_obj_create(m_screen);
@@ -57,8 +72,9 @@ lv_obj_t* JmriConfigScreen::create()
     lv_obj_align(scrollContainer, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_flex_flow(scrollContainer, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(scrollContainer, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(scrollContainer, PADDING, 0);
-    lv_obj_set_style_pad_row(scrollContainer, PADDING, 0);
+    lv_obj_set_style_pad_all(scrollContainer, 6, 0);
+    lv_obj_set_style_pad_row(scrollContainer, 6, 0);
+    lv_obj_clear_flag(scrollContainer, LV_OBJ_FLAG_SCROLLABLE);
     
     // Create fixed button container
     lv_obj_t* buttonContainer = lv_obj_create(m_screen);
@@ -70,8 +86,23 @@ lv_obj_t* JmriConfigScreen::create()
     // Create sections
     createStatusSection(scrollContainer);
     createConfigSection(scrollContainer);
+    createSystemStatusSection(scrollContainer);
     createButtonSection(buttonContainer);
     createKeyboard();
+
+    m_jsonClient.setConnectionStateCallback([this](JmriJsonClient::ConnectionState) {
+        if (lvgl_port_lock(100)) {
+            updateStatus();
+            lvgl_port_unlock();
+        }
+    });
+
+    m_wiThrottleClient.setConnectionStateCallback([this](WiThrottleClient::ConnectionState) {
+        if (lvgl_port_lock(100)) {
+            updateStatus();
+            lvgl_port_unlock();
+        }
+    });
     
     // Load saved settings
     loadSettings();
@@ -91,16 +122,46 @@ void JmriConfigScreen::createStatusSection(lv_obj_t* parent)
     lv_obj_t* titleLabel = lv_label_create(parent);
     lv_label_set_text(titleLabel, "JMRI Server Configuration");
     lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_20, 0);
-    
-    // JSON API Status
-    m_jsonStatusLabel = lv_label_create(parent);
-    lv_label_set_text(m_jsonStatusLabel, "JSON API: Disconnected");
-    lv_obj_set_width(m_jsonStatusLabel, LV_PCT(90));
-    
-    // WiThrottle Status
-    m_wiThrottleStatusLabel = lv_label_create(parent);
-    lv_label_set_text(m_wiThrottleStatusLabel, "WiThrottle: Disconnected");
-    lv_obj_set_width(m_wiThrottleStatusLabel, LV_PCT(90));
+}
+
+void JmriConfigScreen::createSystemStatusSection(lv_obj_t* parent)
+{
+    lv_obj_t* header = lv_label_create(parent);
+    lv_label_set_text(header, "System Status");
+    lv_obj_set_style_text_font(header, &lv_font_montserrat_20, 0);
+
+    lv_obj_t* statusContainer = lv_obj_create(parent);
+    lv_obj_remove_style_all(statusContainer);
+    lv_obj_set_width(statusContainer, LV_PCT(100));
+    lv_obj_set_height(statusContainer, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(statusContainer, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(statusContainer, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(statusContainer, 0, 0);
+    lv_obj_set_style_pad_row(statusContainer, 2, 0);
+
+    addStatusRow(statusContainer, "Software", &m_statusSoftwareValue);
+    addStatusRow(statusContainer, "Hardware", &m_statusHardwareValue);
+    addStatusRow(statusContainer, "WiFi", &m_statusWifiValue);
+    addStatusRow(statusContainer, "WiThrottle", &m_statusWiThrottleValue);
+    addStatusRow(statusContainer, "JMRI JSON", &m_statusJsonValue);
+    addStatusRow(statusContainer, "Encoder 1", &m_statusEncoder1Value);
+    addStatusRow(statusContainer, "Encoder 2", &m_statusEncoder2Value);
+}
+
+void JmriConfigScreen::addStatusRow(lv_obj_t* parent, const char* label, lv_obj_t** valueLabel)
+{
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t* labelObj = lv_label_create(row);
+    lv_label_set_text(labelObj, label);
+
+    *valueLabel = lv_label_create(row);
+    lv_label_set_text(*valueLabel, "-");
 }
 
 void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
@@ -111,6 +172,7 @@ void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
     lv_obj_set_size(configContainer, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(configContainer, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(configContainer, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_bottom(configContainer, 50, 0);
     lv_obj_set_style_pad_column(configContainer, 20, 0);
     
     // Left column (Server settings)
@@ -188,26 +250,15 @@ void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
     lv_obj_add_event_cb(m_speedStepsInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
     lv_obj_add_event_cb(m_speedStepsInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
 
-    // Info label
-    lv_obj_t* infoLabel = lv_label_create(rightColumn);
-    lv_label_set_text(infoLabel, 
-        "JSON API port is auto-discovered by WiThrottle.\n\n"
-        "Common power manager names:\n"
-        "• DCC++\n"
-        "• main\n"
-        "• MQTT");
-    lv_obj_set_width(infoLabel, LV_PCT(100));
-    lv_obj_set_style_text_font(infoLabel, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(infoLabel, lv_color_hex(0x808080), 0);
+    // Notes removed to make space for status summary row
 }
 
 void JmriConfigScreen::createButtonSection(lv_obj_t* parent)
 {
-    // Button container
+    // Button row
     lv_obj_t* buttonContainer = lv_obj_create(parent);
     lv_obj_remove_style_all(buttonContainer);
     lv_obj_set_size(buttonContainer, LV_PCT(100), BUTTON_HEIGHT);
-    lv_obj_center(buttonContainer);
     lv_obj_set_flex_flow(buttonContainer, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(buttonContainer, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
@@ -238,6 +289,7 @@ void JmriConfigScreen::createButtonSection(lv_obj_t* parent)
     lv_label_set_text(backLabel, "Back");
     lv_obj_center(backLabel);
     lv_obj_add_event_cb(m_backButton, onBackButtonClicked, LV_EVENT_CLICKED, this);
+
 }
 
 void JmriConfigScreen::createKeyboard()
@@ -294,54 +346,72 @@ void JmriConfigScreen::hideKeyboard()
 
 void JmriConfigScreen::updateStatus()
 {
-    // Update JSON API status
     auto jsonState = m_jsonClient.getState();
     switch (jsonState) {
         case JmriJsonClient::ConnectionState::CONNECTED:
-            lv_label_set_text(m_jsonStatusLabel, "JSON API: Connected");
-            lv_obj_set_style_text_color(m_jsonStatusLabel, lv_color_hex(0x00FF00), 0);
             lv_obj_clear_state(m_disconnectButton, LV_STATE_DISABLED);
             lv_obj_add_state(m_connectButton, LV_STATE_DISABLED);
             break;
         case JmriJsonClient::ConnectionState::CONNECTING:
-            lv_label_set_text(m_jsonStatusLabel, "JSON API: Connecting...");
-            lv_obj_set_style_text_color(m_jsonStatusLabel, lv_color_hex(0xFFFF00), 0);
             lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
             lv_obj_add_state(m_connectButton, LV_STATE_DISABLED);
             break;
         case JmriJsonClient::ConnectionState::FAILED:
-            lv_label_set_text(m_jsonStatusLabel, "JSON API: Connection Failed");
-            lv_obj_set_style_text_color(m_jsonStatusLabel, lv_color_hex(0xFF0000), 0);
             lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
             lv_obj_clear_state(m_connectButton, LV_STATE_DISABLED);
             break;
         default:
-            lv_label_set_text(m_jsonStatusLabel, "JSON API: Disconnected");
-            lv_obj_set_style_text_color(m_jsonStatusLabel, lv_color_hex(0xAAAAAA), 0);
             lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
             lv_obj_clear_state(m_connectButton, LV_STATE_DISABLED);
             break;
     }
-    
-    // Update WiThrottle status
-    auto wtState = m_wiThrottleClient.getState();
-    switch (wtState) {
-        case WiThrottleClient::ConnectionState::CONNECTED:
-            lv_label_set_text(m_wiThrottleStatusLabel, "WiThrottle: Connected");
-            lv_obj_set_style_text_color(m_wiThrottleStatusLabel, lv_color_hex(0x00FF00), 0);
-            break;
-        case WiThrottleClient::ConnectionState::CONNECTING:
-            lv_label_set_text(m_wiThrottleStatusLabel, "WiThrottle: Connecting...");
-            lv_obj_set_style_text_color(m_wiThrottleStatusLabel, lv_color_hex(0xFFFF00), 0);
-            break;
-        case WiThrottleClient::ConnectionState::FAILED:
-            lv_label_set_text(m_wiThrottleStatusLabel, "WiThrottle: Connection Failed");
-            lv_obj_set_style_text_color(m_wiThrottleStatusLabel, lv_color_hex(0xFF0000), 0);
-            break;
-        default:
-            lv_label_set_text(m_wiThrottleStatusLabel, "WiThrottle: Disconnected");
-            lv_obj_set_style_text_color(m_wiThrottleStatusLabel, lv_color_hex(0xAAAAAA), 0);
-            break;
+
+    if (m_statusSoftwareValue) {
+        const esp_app_desc_t* appDesc = esp_app_get_description();
+        lv_label_set_text(m_statusSoftwareValue, appDesc ? appDesc->version : "unknown");
+    }
+
+    if (m_statusHardwareValue) {
+        esp_chip_info_t chipInfo{};
+        esp_chip_info(&chipInfo);
+        char hwLabel[32];
+        snprintf(hwLabel, sizeof(hwLabel), "ESP32-S3 rev %d", chipInfo.revision);
+        lv_label_set_text(m_statusHardwareValue, hwLabel);
+    }
+
+    if (m_statusWifiValue) {
+        lv_label_set_text(m_statusWifiValue,
+                          (m_wifiController && m_wifiController->isConnected()) ? "Connected" : "Disconnected");
+    }
+
+    if (m_statusWiThrottleValue) {
+        lv_label_set_text(m_statusWiThrottleValue, m_wiThrottleClient.isConnected() ? "Connected" : "Disconnected");
+    }
+
+    if (m_statusJsonValue) {
+        lv_label_set_text(m_statusJsonValue, m_jsonClient.isConnected() ? "Connected" : "Disconnected");
+    }
+
+    if (m_statusEncoder1Value) {
+        if (m_encoderHal) {
+            auto status = m_encoderHal->getStatus(0);
+            char text[24];
+            snprintf(text, sizeof(text), "0x%02X %s", status.address, status.present ? "present" : "missing");
+            lv_label_set_text(m_statusEncoder1Value, text);
+        } else {
+            lv_label_set_text(m_statusEncoder1Value, "Unavailable");
+        }
+    }
+
+    if (m_statusEncoder2Value) {
+        if (m_encoderHal) {
+            auto status = m_encoderHal->getStatus(1);
+            char text[24];
+            snprintf(text, sizeof(text), "0x%02X %s", status.address, status.present ? "present" : "missing");
+            lv_label_set_text(m_statusEncoder2Value, text);
+        } else {
+            lv_label_set_text(m_statusEncoder2Value, "Unavailable");
+        }
     }
 }
 

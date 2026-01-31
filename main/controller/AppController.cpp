@@ -7,6 +7,7 @@
 #include "ThrottleController.h"
 #include "WiFiController.h"
 #include "JmriConnectionController.h"
+#include "../hardware/RotaryEncoderHal.h"
 
 AppController& AppController::instance()
 {
@@ -21,6 +22,7 @@ AppController::AppController()
     , m_throttleController(nullptr)
     , m_wifiController(nullptr)
     , m_jmriConnectionController(nullptr)
+    , m_rotaryEncoderHal(nullptr)
     , m_initialised(false)
 {
 }
@@ -62,6 +64,26 @@ void AppController::initialise()
         m_throttleController->initialize();
     }
 
+    if (!m_rotaryEncoderHal) {
+        m_rotaryEncoderHal = std::make_unique<RotaryEncoderHal>();
+        m_rotaryEncoderHal->initialise();
+        m_rotaryEncoderHal->setRotationCallback(
+            [this](int knobId, int delta) {
+                if (m_throttleController) {
+                    m_throttleController->onKnobRotation(knobId, delta);
+                }
+            }
+        );
+        m_rotaryEncoderHal->setPressCallback(
+            [this](int knobId, bool pressed) {
+                if (pressed && m_throttleController) {
+                    m_throttleController->onKnobPress(knobId);
+                }
+            }
+        );
+        m_rotaryEncoderHal->startPollingTask();
+    }
+
     m_initialised = true;
 }
 
@@ -94,7 +116,10 @@ void AppController::showJmriConfigScreen()
 {
     initialise();
 
-    auto* screen = new JmriConfigScreen(*m_jmriClient, *m_wiThrottleClient);
+    auto* screen = new JmriConfigScreen(*m_jmriClient,
+                                       *m_wiThrottleClient,
+                                       m_wifiController.get(),
+                                       m_rotaryEncoderHal.get());
     screen->create();
 }
 
@@ -124,4 +149,9 @@ WiFiController* AppController::getWiFiController() const
 JmriConnectionController* AppController::getJmriConnectionController() const
 {
     return m_jmriConnectionController.get();
+}
+
+RotaryEncoderHal* AppController::getRotaryEncoderHal() const
+{
+    return m_rotaryEncoderHal.get();
 }

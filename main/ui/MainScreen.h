@@ -1,8 +1,14 @@
 #pragma once
 
+#ifndef ENABLE_VIRTUAL_ENCODER
+#define ENABLE_VIRTUAL_ENCODER 0
+#endif
+
 #include "lvgl.h"
 #include "components/ThrottleMeter.h"
+#if ENABLE_VIRTUAL_ENCODER
 #include "components/VirtualEncoderPanel.h"
+#endif
 #include "components/RosterCarousel.h"
 #include "components/PowerStatusBar.h"
 #include "components/FunctionPanel.h"
@@ -88,7 +94,9 @@ private:
     std::array<std::unique_ptr<ThrottleMeter>, 4> m_throttleMeters;
     
     // Virtual encoder panel for testing
+#if ENABLE_VIRTUAL_ENCODER
     std::unique_ptr<VirtualEncoderPanel> m_virtualEncoderPanel;
+#endif
     
     // Throttle controller (not owned - managed at application layer)
     ThrottleController* m_throttleController;

@@ -5,9 +5,10 @@ This directory contains hardware abstraction layer (HAL) code for physical devic
 ## Planned Components
 
 ### Rotary Encoders
-- **File**: `RotaryEncoder.h/cpp`
-- **Purpose**: Driver for EC11 rotary encoders used for throttle control
-- **Hardware**: 2x EC11 encoders connected via I2C (PCA9554 expander)
+- **File**: `RotaryEncoderHal.h/cpp`
+- **Purpose**: HAL for I2C rotary encoders used for throttle control
+- **Hardware**: 2x Adafruit I2C rotary encoders
+- **Addresses (fixed)**: `0x76` (encoder 1), `0x77` (encoder 2)
 
 ### Knob Assignment
 - **File**: `KnobManager.h/cpp`

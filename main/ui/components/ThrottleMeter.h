@@ -2,6 +2,7 @@
 
 #include "lvgl.h"
 #include <cstdint>
+#include <string>
 
 /**
  * @brief Throttle meter widget - displays speed with a circular gauge
@@ -157,6 +158,12 @@ private:
     bool m_knobAvailable[2];         // Availability for each knob
     bool m_forwardDirection;         // true=forward, false=reverse
     void* m_userData;                 // User data for callbacks
+
+    int32_t m_lastDisplayedValue;
+    std::string m_lastUnitText;
+    std::string m_lastLocoName;
+    int m_lastLocoAddress;
+    bool m_hasLoco;
     
     // Constants
     static constexpr lv_coord_t BASE_SIZE = 200;

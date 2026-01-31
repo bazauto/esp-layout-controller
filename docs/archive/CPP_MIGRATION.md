@@ -152,5 +152,5 @@ main/
 
 ## Hardware Status
 - ✅ I2C address conflict resolved (LTC4316 translator)
-- ⏳ Waiting for LTC4316 hardware to arrive
-- 📋 Encoder addresses will be 0x76 and 0x77
+- ✅ First hardware encoder connected and stable delta reads confirmed
+- 📋 Encoder addresses: 0x76 and 0x77
