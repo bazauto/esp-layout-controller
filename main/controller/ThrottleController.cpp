@@ -5,7 +5,7 @@
 #include "nvs.h"
 
 static const char* TAG = "ThrottleController";
-static const char* NVS_NAMESPACE = "jmri_config";
+static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 
 ThrottleController::ThrottleController(WiThrottleClient* wiThrottleClient)
