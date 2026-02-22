@@ -18,5 +18,6 @@
     "--compile-commands-dir=e:\\Development\\esp-layout-controller\\build"
   ],
   "idf.flashType": "UART",
-  "idf.portWin": "COM4"
+  "idf.portWin": "COM4",
+  "idf.currentSetup": "E:\\Development\\esp-idf\\v5.5.2\\esp-idf"
 }
