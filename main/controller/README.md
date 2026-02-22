@@ -1,30 +1,12 @@
 # Controller Layer
 
-This directory contains business logic and coordination between layers.
+Business logic and coordination between layers. See [docs/components/CONTROLLER_LAYER.md](../../docs/components/CONTROLLER_LAYER.md) for full reference.
 
-## Planned Components
+## Components
 
-### Application Controller
-- **File**: `AppController.h/cpp`
-- **Purpose**: Main application coordinator
-- **Responsibilities**:
-  - Initialize all subsystems
-  - Coordinate between UI, hardware, and communication layers
-  - Manage application state
-  - Handle global events
-
-### Throttle Controller
-- **File**: `ThrottleController.h/cpp`
-- **Purpose**: Coordinate throttle operations
-- **Responsibilities**:
-  - Process encoder input and update throttle speed
-  - Send speed commands to WiThrottle server
-  - Update UI when state changes
-  - Handle throttle acquisition/release
-
-## Guidelines
-
-- Controllers coordinate between layers but don't contain hardware or UI code
-- Use dependency injection for testability
-- Keep controllers focused on coordination, not implementation details
-- Controllers should be the "glue" between model, view, and hardware
+| File | Purpose |
+|------|---------|
+| `AppController` | Singleton owning all services, manages screen lifecycle |
+| `ThrottleController` | Coordinates 4 throttles + 2 knobs, routes input, sends network commands |
+| `WiFiController` | WiFi lifecycle and auto-connect |
+| `JmriConnectionController` | JMRI auto-connect, NVS settings, reconnect with backoff |

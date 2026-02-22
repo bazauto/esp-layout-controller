@@ -2,7 +2,13 @@
 
 ## Project Context
 ESP32-S3 model railway control interface: LVGL UI, WiThrottle protocol, 4 throttles, 2 rotary encoders.
-See `docs/PROJECT_OVERVIEW.md` for complete description.
+
+### Key Documentation
+- **[docs/PROJECT_OVERVIEW.md](../docs/PROJECT_OVERVIEW.md)**: High-level project overview
+- **[docs/architecture/](../docs/architecture/)**: System design, threading model, state machines, NVS storage
+- **[docs/flows/](../docs/flows/)**: Sequence diagrams for all application flows
+- **[docs/components/](../docs/components/)**: Detailed per-layer component reference
+- **[docs/protocols/](../docs/protocols/)**: WiThrottle and JMRI JSON protocol references
 
 ## Code Style
 

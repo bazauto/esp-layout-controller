@@ -1,27 +1,19 @@
 # ESP Layout Controller - Project Overview
 
-## Documentation
-- **This file**: High-level project overview and architecture
-- **[THROTTLE_UI_IMPLEMENTATION_PLAN.md](./THROTTLE_UI_IMPLEMENTATION_PLAN.md)**: Implementation phases and state machines
-- **[WITHROTTLE_PROTOCOL.md](./WITHROTTLE_PROTOCOL.md)**: WiThrottle protocol reference
+## Documentation Index
 
-## Current Status: Phases 1, 2, 3, 4, 5, 6 Complete!
-✅ **Completed:**
-- **Architecture**: Layered design with application-layer state management
-- **UI**: 4 throttle meters, virtual encoder panel, settings screens
-- **State Management**: Throttle & knob state machines fully implemented
-- **WiThrottle Integration**: Protocol client with speed/direction/function control
-- **Networking**: WiFi config, JMRI JSON API, track power control
-- **Thread Safety**: LVGL mutex protection for multi-core safety
-- **Configuration**: Configurable speed steps per knob click (NVS storage)
+| Document | Purpose |
+|----------|---------|
+| **This file** | High-level project overview |
+| **[architecture/](./architecture/)** | System design, threading, state machines, NVS |
+| **[flows/](./flows/)** | Sequence diagrams for all application flows |
+| **[components/](./components/)** | Detailed reference for each code layer |
+| **[protocols/WITHROTTLE_PROTOCOL.md](./protocols/WITHROTTLE_PROTOCOL.md)** | WiThrottle protocol reference |
+| **[protocols/JMRI_JSON_API.md](./protocols/JMRI_JSON_API.md)** | JMRI JSON API reference |
 
-🔄 **In Progress:**
-- Testing speed control with periodic state polling (JMRI quirks workaround)
+## Status
 
-⏭️ **Next Steps:**
-- Hardware encoder integration when available (Phase 7)
-
-**See [THROTTLE_UI_IMPLEMENTATION_PLAN.md](./THROTTLE_UI_IMPLEMENTATION_PLAN.md) for detailed phase breakdown.**
+Core functionality (Phases 1–6) complete. Phase 7 (hardware encoder integration) in progress — awaiting physical encoder hardware.
 
 ## Project Goal
 7" touchscreen interface for model railway control: 4 simultaneous locomotives via WiThrottle protocol.
