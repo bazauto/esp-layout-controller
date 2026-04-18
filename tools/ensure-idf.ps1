@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $IdfPath = $env:IDF_PATH
 if ([string]::IsNullOrWhiteSpace($IdfPath)) {
-    $IdfPath = Join-Path $PSScriptRoot '..\esp-idf\v5.5.2\esp-idf'
+    $IdfPath = Join-Path $PSScriptRoot '..\..\esp-idf\v5.5.2\esp-idf'
 }
 $IdfPath = (Resolve-Path $IdfPath).Path
 
