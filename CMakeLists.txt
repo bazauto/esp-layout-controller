@@ -5,7 +5,7 @@
 cmake_minimum_required(VERSION 3.5)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 add_compile_options("-Wno-attributes")
-project(lvgl_porting)
+project(esp_layout_controller)
 
 if(DEFINED ENV{IDF_PYTHON_ENV_PATH})
 	set(IDF_PYTHON_EXECUTABLE "$ENV{IDF_PYTHON_ENV_PATH}/Scripts/python.exe")
@@ -16,13 +16,16 @@ endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-if(NOT TARGET test)
-	if(EXISTS "${CMAKE_SOURCE_DIR}/test_app.py")
-		add_custom_target(test
-			COMMAND ${Python3_EXECUTABLE} $ENV{IDF_PATH}/tools/idf.py -B ${CMAKE_BINARY_DIR} -p COM4 flash
-			COMMAND ${Python3_EXECUTABLE} -m pytest -s
-			WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-			COMMENT "Running pytest-embedded tests"
-		)
-	endif()
+# Serial port for flashing — override with ESP_PORT environment variable
+if(NOT DEFINED ENV{ESP_PORT})
+	set(ENV{ESP_PORT} "COM4")
+endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/test_app.py")
+	add_custom_target(flash_test
+		COMMAND ${Python3_EXECUTABLE} $ENV{IDF_PATH}/tools/idf.py -B ${CMAKE_BINARY_DIR} -p $ENV{ESP_PORT} flash
+		COMMAND ${Python3_EXECUTABLE} -m pytest -s --port $ENV{ESP_PORT}
+		WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+		COMMENT "Running pytest-embedded tests"
+	)
 endif()
