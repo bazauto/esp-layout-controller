@@ -8,8 +8,10 @@
  * - Initialize hardware (LCD, touch, LVGL)
  * - Launch application UI (C++ AppController)
  * 
- * SPDX-FileCopyrightText: 2023-2024 Espressif Systems (Shanghai) CO LTD
- * SPDX-License-Identifier: CC0-1.0
+ * Based on the Espressif RGB Avoid Tearing example (CC0-1.0).
+ *
+ * SPDX-FileCopyrightText: 2024-2026 Paul Barrett
+ * SPDX-License-Identifier: MIT
  */
 
 #include "waveshare_rgb_lcd_port.h"
