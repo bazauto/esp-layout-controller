@@ -16,10 +16,11 @@ A 7" touchscreen interface for model railway control, built on the ESP32-S3. Con
 
 | Component | Detail |
 |-----------|--------|
+| Board | [Waveshare ESP32-S3 7" Touch Display](https://www.waveshare.com/esp32-s3-touch-lcd-7.htm) |
 | MCU | ESP32-S3 (dual-core, 8 MB flash, 8 MB PSRAM) |
 | Display | 7" RGB LCD, 800×480, ST7701 controller |
 | Touch | GT911 capacitive (I2C) |
-| Encoders | 2× Adafruit I2C Seesaw rotary encoders (0x76, 0x77 via LTC4316) |
+| Encoders | 2× [Adafruit I2C QT Rotary Encoder](https://www.adafruit.com/product/4991) with Seesaw (0x76, 0x77 via LTC4316) |
 
 ## Architecture
 
