@@ -269,7 +269,7 @@ ESP32
 **For this project:**
 - Track power control is **infrequent** → HTTP is perfect
 - WiThrottle already handles real-time throttle updates
-- Can add WebSocket later for sensors if needed (Phase 7)
+- Can add WebSocket later for sensors if needed (future)
 
 ## Example HTTP Implementation (ESP32)
 

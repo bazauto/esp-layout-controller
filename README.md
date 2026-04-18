@@ -1,96 +1,100 @@
-| Supported Targets | ESP32-S3 |
-| ----------------- | -------- |
+# ESP Layout Controller
 
-| Supported LCD Controller    | ST7701 |
-| ----------------------------| -------|
+A 7" touchscreen interface for model railway control, built on the ESP32-S3. Connects to [JMRI](https://www.jmri.org/) via the [WiThrottle protocol](https://www.jmri.org/help/en/package/jmri/jmrit/withrottle/Protocol.shtml) over WiFi to drive up to 4 locomotives simultaneously, with 2 physical rotary encoders for speed control and roster browsing.
 
-| Supported Touch Controller  |  GT911 |
-| ----------------------------| -------|
+## Features
 
-# RGB Avoid Tearing Example
+- **4 simultaneous throttles** — control 4 locomotives independently from a single device
+- **2 rotary encoders** — physical speed knobs with push-button assignment via Adafruit I2C Seesaw encoders
+- **Touch UI** — 800×480 LVGL interface with throttle meters, roster carousel, and function buttons
+- **WiThrottle protocol** — standard wireless throttle protocol, compatible with JMRI and other WiThrottle servers
+- **JMRI JSON API** — WebSocket connection for track power control and roster retrieval
+- **NVS persistence** — WiFi credentials and JMRI server settings saved across reboots
+- **Virtual encoders** — on-screen encoder substitutes for development without physical hardware
 
-[esp_lcd](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/lcd.html) provides several panel drivers out-of box, e.g. ST7789, SSD1306, NT35510. However, there're a lot of other panels on the market, it's beyond `esp_lcd` component's responsibility to include them all.
+## Hardware
 
-`esp_lcd` allows user to add their own panel drivers in the project scope (i.e. panel driver can live outside of esp-idf), so that the upper layer code like LVGL porting code can be reused without any modifications, as long as user-implemented panel driver follows the interface defined in the `esp_lcd` component.
+| Component | Detail |
+|-----------|--------|
+| MCU | ESP32-S3 (dual-core, 8 MB flash, 8 MB PSRAM) |
+| Display | 7" RGB LCD, 800×480, ST7701 controller |
+| Touch | GT911 capacitive (I2C) |
+| Encoders | 2× Adafruit I2C Seesaw rotary encoders (0x76, 0x77 via LTC4316) |
 
-This example demonstrates how to avoid tearing when using LVGL with RGB interface screens in an esp-idf project. The example will use the LVGL library to draw a stylish music player.
+## Architecture
 
-This example uses the [esp_timer](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/esp_timer.html) to generate the ticks needed by LVGL and uses a dedicated task to run the `lv_timer_handler()`. Since the LVGL APIs are not thread-safe, this example uses a mutex which be invoked before the call of `lv_timer_handler()` and released after it. The same mutex needs to be used in other tasks and threads around every LVGL (lv_...) related function call and code. For more porting guides, please refer to [LVGL porting doc](https://docs.lvgl.io/master/porting/index.html).
-
-## How to use the example
-
-## ESP-IDF Required
-
-### Hardware Required
-
-* An ESP32-S3R8 development board
-* A ST7701 LCD panel, with RGB interface
-* An USB cable for power supply and programming
-
-### Hardware Connection
-
-The connection between ESP Board and the LCD is as follows:
+The project follows a layered architecture where **state lives at the application layer, not in the UI**. The UI can be destroyed and recreated without losing throttle state or network connections.
 
 ```
-       ESP Board                           RGB  Panel
-+-----------------------+              +-------------------+
-|                   GND +--------------+GND                |
-|                       |              |                   |
-|                   3V3 +--------------+VCC                |
-|                       |              |                   |
-|                   PCLK+--------------+PCLK               |
-|                       |              |                   |
-|             DATA[15:0]+--------------+DATA[15:0]         |
-|                       |              |                   |
-|                  HSYNC+--------------+HSYNC              |
-|                       |              |                   |
-|                  VSYNC+--------------+VSYNC              |
-|                       |              |                   |
-|                     DE+--------------+DE                 |
-|                       |              |                   |
-|               BK_LIGHT+--------------+BLK                |
-+-----------------------+              |                   |
-                               3V3-----+DISP_EN            |
-                                       |                   |
-                                       +-------------------+
+main/
+├── model/          # Data: Locomotive, Throttle, Knob, Roster
+├── hardware/       # HAL: rotary encoder driver
+├── communication/  # WiFi, WiThrottle (TCP), JMRI JSON (WebSocket)
+├── controller/     # AppController, ThrottleController, WiFiController
+├── ui/             # LVGL screens and components
+└── tests/          # On-device unit tests (Unity)
 ```
 
-* The LCD parameters and GPIO number used by this example can be changed in [example_rgb_avoid_tearing.c](main/example_rgb_avoid_tearing.c). Especially, please pay attention to the **vendor specific initialization**, it can be different between manufacturers and should consult the LCD supplier for initialization sequence code.
-* The LVGL parameters can be changed not only through `menuconfig` but also directly in `lvgl_conf.h`
+See [docs/](docs/) for detailed architecture, threading model, state machines, protocol references, and sequence diagrams.
 
-### Configure the Project
+## Prerequisites
 
-**Note for Windows users:** In a fresh PowerShell terminal, run the helper that only executes the ESP-IDF export if needed:
+- **ESP-IDF v5.5.2** — installed locally (not bundled in this repo)
+- **Python 3** — for the build system and test runner
+- **Windows** — the helper scripts assume PowerShell (contributions for other platforms welcome)
+
+## Getting Started
+
+### Set up ESP-IDF
+
+In a fresh PowerShell terminal, run the helper script to initialise the ESP-IDF environment:
+
 ```powershell
 .\tools\ensure-idf.ps1
 ```
-This sets up the ESP-IDF environment variables (or skips if already initialised) and makes `idf.py` available in your terminal.
 
-Run `idf.py menuconfig` and navigate to `Example Configuration` menu.
+This runs the ESP-IDF export script if needed and makes `idf.py` available in your session.
 
 ### Build and Flash
 
-Run `idf.py set-target esp32s3` to select the target chip.
-
-Run `.\tools\ensure-idf.ps1; idf.py -p PORT build flash monitor` to build, flash and monitor the project. A fancy animation will show up on the LCD as expected.
-
-The first time you run `idf.py` for the example will cost extra time as the build system needs to address the component dependencies and downloads the missing components from registry into `managed_components` folder.
-
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-### Run test builds (no menuconfig)
-
-The default build runs the UI. To run unit tests without changing `menuconfig`, use a separate build directory and a test-specific sdkconfig file:
-
 ```powershell
-.\tools\ensure-idf.ps1; idf.py -B build-tests -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test.defaults" -D SDKCONFIG="build-tests/sdkconfig" test
+.\tools\ensure-idf.ps1; idf.py -p COM4 build flash monitor
 ```
 
-Using a dedicated build directory avoids reusing the normal `sdkconfig` values. If you already ran tests once, delete `build-tests` to force a clean config.
-Ensure the serial monitor is closed so the flash step can access the COM port.
+To use a different serial port, set the `ESP_PORT` environment variable (defaults to `COM4`):
 
-See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
+```powershell
+$env:ESP_PORT = "COM5"
+.\tools\ensure-idf.ps1; idf.py -p $env:ESP_PORT build flash monitor
+```
 
-## Troubleshooting
+The first build will download managed components from the ESP-IDF component registry. To exit the serial monitor, press `Ctrl-]`.
 
-For any technical queries, please open an [issue](https://github.com/espressif/esp-iot-solution/issues) on GitHub. We will get back to you soon.
+### Run Tests
+
+Unit tests run on-device using a separate build configuration:
+
+```powershell
+.\tools\ensure-idf.ps1; idf.py -B build-tests -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test.defaults" -D SDKCONFIG="build-tests/sdkconfig" flash_test
+```
+
+This uses a dedicated build directory so test config doesn't interfere with the normal build. Delete `build-tests/` to force a clean config. Ensure the serial monitor is closed so the flash step can access the COM port.
+
+## Project Status
+
+All core phases are complete. The device is fully functional with touchscreen UI, WiThrottle/JMRI connectivity, and physical rotary encoder control. Future work includes refinement, optimisation, and potential MQTT cab signal integration.
+
+## Licence
+
+This project is licensed under the [MIT License](LICENSE).
+
+The original hardware driver and LVGL port files (`waveshare_rgb_lcd_port.c`, `lvgl_port.c`) retain their upstream SPDX headers (CC0-1.0 and Apache-2.0 respectively).
+
+Third-party components carry their own licences:
+
+| Component | Licence |
+|-----------|---------|
+| [LVGL](https://lvgl.io/) v8.4.0 | MIT |
+| ESP LCD Touch / GT911 | Apache-2.0 |
+| ESP WebSocket Client | Apache-2.0 |
+| ESP-IDF | Apache-2.0 |

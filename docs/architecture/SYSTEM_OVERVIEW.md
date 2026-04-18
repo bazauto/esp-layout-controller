@@ -6,7 +6,7 @@ ESP Layout Controller is an ESP32-S3 firmware providing a 7" touchscreen interfa
 
 **Hardware:** ESP32-S3 (dual-core, 8 MB flash), 800×480 RGB LCD (ST7701), GT911 capacitive touch, 2× Adafruit I2C Seesaw rotary encoders (0x76, 0x77 via LTC4316 address translator).
 
-**Protocols:** WiThrottle (TCP, throttle control + roster), JMRI JSON (WebSocket, track power), MQTT (future, cab signals).
+**Protocols:** WiThrottle (TCP, throttle control + roster), JMRI JSON (WebSocket, track power), MQTT (future — cab signals).
 
 ---
 
