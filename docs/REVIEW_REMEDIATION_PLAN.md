@@ -16,7 +16,7 @@
 | F-04 | [WiFi state callbacks bypass LVGL lock](#f-04-wifi-state-callbacks-bypass-lvgl-lock) | HIGH | Small | **Done** |
 | F-05 | [Blocking I/O in LVGL event handlers](#f-05-blocking-io-in-lvgl-event-handlers) | HIGH | Large | Not Started |
 | F-06 | [Raw pointer accessors bypass state mutex](#f-06-raw-pointer-accessors-bypass-state-mutex) | HIGH | Small | **Done** |
-| F-07 | [`m_powerStates` unprotected across threads](#f-07-m_powerstates-unprotected-across-threads) | HIGH | Small | Not Started |
+| F-07 | [`m_powerStates` unprotected across threads](#f-07-m_powerstates-unprotected-across-threads) | HIGH | Small | **Done** |
 | F-08 | [Screen/callback ownership and lifecycle](#f-08-screencallback-ownership-and-lifecycle) | HIGH | Large | Not Started |
 | F-09 | [Polling timer blocks `esp_timer` task](#f-09-polling-timer-blocks-esp_timer-task) | HIGH | Medium | Not Started |
 | F-10 | [`pollThrottleStates()` bypasses `m_stateMutex`](#f-10-pollthrottlestates-bypasses-m_statemutex) | MEDIUM | Small | Not Started |
@@ -262,7 +262,7 @@ WiFi scan (`performScan()`, ~3s blocking) and WiThrottle connect (synchronous TC
 
 #### Acceptance Criteria
 
-- [ ] All access to `m_powerStates` is mutex-protected.
+- [x] All access to `m_powerStates` is mutex-protected.
 - [ ] Manual test: toggling power on/off from JMRI while the UI is active produces no crash.
 
 ---
@@ -720,3 +720,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-02 completed — cooperative task shutdown via semaphore + `shutdown()` |
 | 2026-04-20 | F-04 completed — `lvgl_port_lock(200)` in WiFi state callback |
 | 2026-04-20 | F-06 completed — accessors gated behind `CONFIG_THROTTLE_TESTS`, `getRoster()` made private |
+| 2026-04-20 | F-07 completed — `m_powerMutex` added to `JmriJsonClient` |

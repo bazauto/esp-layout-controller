@@ -617,18 +617,26 @@ void ThrottleController::pollThrottleStates()
         return;
     }
     
-    // Poll speed and direction for all allocated throttles
+    // Snapshot which throttles are allocated while holding the mutex
+    bool needsPoll[NUM_THROTTLES] = {};
+    if (lockState(pdMS_TO_TICKS(50))) {
+        for (int i = 0; i < NUM_THROTTLES; i++) {
+            auto state = m_throttles[i]->getState();
+            needsPoll[i] = (state == Throttle::State::ALLOCATED_WITH_KNOB ||
+                            state == Throttle::State::ALLOCATED_NO_KNOB);
+        }
+        unlockState();
+    } else {
+        ESP_LOGW(TAG, "Failed to lock state for polling snapshot");
+        return;
+    }
+    
+    // Issue network queries outside the lock
     for (int i = 0; i < NUM_THROTTLES; i++) {
-        Throttle* throttle = m_throttles[i].get();
-        
-        if (throttle->getState() == Throttle::State::ALLOCATED_WITH_KNOB ||
-            throttle->getState() == Throttle::State::ALLOCATED_NO_KNOB) {
-            
-            // Query speed and direction
+        if (needsPoll[i]) {
             char throttleId = '0' + i;
             m_wiThrottleClient->querySpeed(throttleId);
             m_wiThrottleClient->queryDirection(throttleId);
-            
             ESP_LOGD(TAG, "Polling throttle %d state", i);
         }
     }
