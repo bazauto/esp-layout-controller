@@ -8,8 +8,6 @@ Locomotive::Locomotive()
     : m_name("")
     , m_address(0)
     , m_addressType(AddressType::SHORT)
-    , m_speed(0)
-    , m_direction(Direction::FORWARD)
     , m_speedStepMode(SpeedStepMode::STEPS_128)
     , m_functionStates{}
     , m_functionLabels{}
@@ -20,8 +18,6 @@ Locomotive::Locomotive(const std::string& name, uint16_t address, AddressType ad
     : m_name(name)
     , m_address(address)
     , m_addressType(addressType)
-    , m_speed(0)
-    , m_direction(Direction::FORWARD)
     , m_speedStepMode(SpeedStepMode::STEPS_128)
     , m_functionStates{}
     , m_functionLabels{}
@@ -53,20 +49,6 @@ std::string Locomotive::getAddressString() const
         oss << "L" << m_address;
     }
     return oss.str();
-}
-
-void Locomotive::setSpeed(uint8_t speed)
-{
-    // Clamp to valid range for 128 speed steps (0-126)
-    if (speed > 126) {
-        speed = 126;
-    }
-    m_speed = speed;
-}
-
-void Locomotive::setDirection(Direction direction)
-{
-    m_direction = direction;
 }
 
 void Locomotive::setSpeedStepMode(SpeedStepMode mode)

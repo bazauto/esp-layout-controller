@@ -10,13 +10,6 @@ static void test_locomotive_address_string(void)
     TEST_ASSERT_EQUAL_STRING("L300", longLoco.getAddressString().c_str());
 }
 
-static void test_locomotive_speed_clamps(void)
-{
-    Locomotive loco("Speed", 1, Locomotive::AddressType::SHORT);
-    loco.setSpeed(200);
-    TEST_ASSERT_EQUAL(126, loco.getSpeed());
-}
-
 static void test_locomotive_functions(void)
 {
     Locomotive loco("Func", 2, Locomotive::AddressType::SHORT);
@@ -33,6 +26,5 @@ static void test_locomotive_functions(void)
 extern "C" void register_locomotive_tests(void)
 {
     RUN_TEST(test_locomotive_address_string);
-    RUN_TEST(test_locomotive_speed_clamps);
     RUN_TEST(test_locomotive_functions);
 }

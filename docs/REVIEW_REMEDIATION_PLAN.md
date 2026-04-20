@@ -26,7 +26,7 @@
 | F-14 | [Infinite LVGL lock in PowerStatusBar](#f-14-infinite-lvgl-lock-in-powerstatusbar) | MEDIUM | Small | **Done** |
 | F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | **Done** |
 | F-16 | [Unused Roster model class](#f-16-unused-roster-model-class) | LOW | Small | **Done** |
-| F-17 | [Duplicate speed/direction in Throttle and Locomotive](#f-17-duplicate-speeddirection-in-throttle-and-locomotive) | LOW | Small | Not Started |
+| F-17 | [Duplicate speed/direction in Throttle and Locomotive](#f-17-duplicate-speeddirection-in-throttle-and-locomotive) | LOW | Small | **Done** |
 | F-18 | [WiFi password in plaintext NVS](#f-18-wifi-password-in-plaintext-nvs) | LOW | Small | Not Started |
 
 ### Effort Key
@@ -509,9 +509,9 @@ Both `Throttle` (`m_currentSpeed`, `m_direction`) and `Locomotive` (`m_speed`, `
 
 #### Acceptance Criteria
 
-- [ ] `Locomotive` has no speed/direction fields.
-- [ ] All speed/direction reads go through `Throttle`.
-- [ ] All tests pass.
+- [x] `Locomotive` has no speed/direction fields.
+- [x] All speed/direction reads go through `Throttle`.
+- [x] All tests pass — 25 tests, 0 failures.
 
 ---
 
@@ -731,3 +731,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-12 completed — `messageBuffer` capped at 4 KiB |
 | 2026-04-20 | F-13 completed — cached speed-step setting now reloads immediately from settings |
 | 2026-04-20 | F-16 completed — removed unused Roster model and isolated roster tests |
+| 2026-04-20 | F-17 completed — Locomotive now stores identity/function metadata only |

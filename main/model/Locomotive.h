@@ -4,10 +4,10 @@
 #include <string>
 
 /**
- * @brief Represents a single locomotive with its DCC address, name, and state.
+ * @brief Represents a single locomotive with its DCC identity and function metadata.
  * 
  * This is a pure data model class with no UI or I/O dependencies.
- * Stores locomotive information from the WiThrottle roster and current state.
+ * Stores locomotive information from the WiThrottle roster plus function labels/states.
  */
 class Locomotive {
 public:
@@ -17,14 +17,6 @@ public:
     enum class AddressType {
         SHORT,  // Short DCC address (1-127)
         LONG    // Long DCC address (128-10239)
-    };
-
-    /**
-     * @brief Direction of travel
-     */
-    enum class Direction {
-        REVERSE = 0,
-        FORWARD = 1
     };
 
     /**
@@ -56,8 +48,6 @@ public:
     uint16_t getAddress() const { return m_address; }
     AddressType getAddressType() const { return m_addressType; }
     bool isLongAddress() const { return m_addressType == AddressType::LONG; }
-    uint8_t getSpeed() const { return m_speed; }
-    Direction getDirection() const { return m_direction; }
     SpeedStepMode getSpeedStepMode() const { return m_speedStepMode; }
     
     /**
@@ -81,8 +71,6 @@ public:
     std::string getAddressString() const;
 
     // Setters
-    void setSpeed(uint8_t speed);
-    void setDirection(Direction direction);
     void setSpeedStepMode(SpeedStepMode mode);
     
     /**
@@ -106,8 +94,6 @@ private:
     std::string m_name;
     uint16_t m_address;
     AddressType m_addressType;
-    uint8_t m_speed;                        // 0-126 for 128 speed steps
-    Direction m_direction;
     SpeedStepMode m_speedStepMode;
     
     bool m_functionStates[MAX_FUNCTIONS];   // F0-F28 states
