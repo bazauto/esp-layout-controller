@@ -1,7 +1,13 @@
 #include "WiFiConfigScreen.h"
 #include "wrappers/wifi_config_wrapper.h"
 #include "esp_log.h"
+#include "lvgl_port.h"
 #include <algorithm>
+
+extern "C" {
+    bool lvgl_port_lock(int timeout_ms);
+    void lvgl_port_unlock(void);
+}
 
 static const char* TAG = "WiFiConfigScreen";
 
@@ -318,7 +324,15 @@ void WiFiConfigScreen::onNetworkSelected(lv_event_t* e)
 void WiFiConfigScreen::onWiFiStateChanged(void* userData, WiFiManager::State state)
 {
     WiFiConfigScreen* screen = static_cast<WiFiConfigScreen*>(userData);
-    screen->updateStatus();
+    
+    // This callback fires from the WiFi event handler task, not the LVGL task.
+    // We must acquire the LVGL lock before touching any widgets.
+    if (lvgl_port_lock(200)) {
+        screen->updateStatus();
+        lvgl_port_unlock();
+    } else {
+        ESP_LOGW(TAG, "Failed to acquire LVGL lock for WiFi state update");
+    }
     
     ESP_LOGI(TAG, "WiFi state changed to %d", static_cast<int>(state));
 }

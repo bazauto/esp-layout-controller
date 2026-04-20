@@ -11,7 +11,7 @@
 | ID | Finding | Severity | Effort | Status |
 |----|---------|----------|--------|--------|
 | F-01 | [Unserialized TCP `send()` in WiThrottleClient](#f-01-unserialized-tcp-send-in-withrottleclient) | CRITICAL | Small | **Done** |
-| F-02 | [Receive task lifecycle race in `disconnect()`](#f-02-receive-task-lifecycle-race-in-disconnect) | CRITICAL | Medium | Not Started |
+| F-02 | [Receive task lifecycle race in `disconnect()`](#f-02-receive-task-lifecycle-race-in-disconnect) | CRITICAL | Medium | **Done** |
 | F-03 | [Config screen memory leaks](#f-03-config-screen-memory-leaks) | HIGH | Medium | Not Started |
 | F-04 | [WiFi state callbacks bypass LVGL lock](#f-04-wifi-state-callbacks-bypass-lvgl-lock) | HIGH | Small | Not Started |
 | F-05 | [Blocking I/O in LVGL event handlers](#f-05-blocking-io-in-lvgl-event-handlers) | HIGH | Large | Not Started |
@@ -136,10 +136,10 @@ Low-risk code quality improvements.
 
 #### Acceptance Criteria
 
-- [ ] `disconnect()` never calls `eTaskGetState()` or `vTaskDelete(handle)` on the receive task.
-- [ ] Receive task signals exit before self-deleting.
-- [ ] `disconnect()` waits for the signal (with bounded timeout) before closing the socket.
-- [ ] Existing unit tests pass.
+- [x] `disconnect()` never calls `eTaskGetState()` or `vTaskDelete(handle)` on the receive task.
+- [x] Receive task signals exit before self-deleting.
+- [x] `disconnect()` waits for the signal (with bounded timeout) before closing the socket.
+- [x] Existing unit tests pass — 29 tests, 0 failures.
 - [ ] Manual test: repeated connect/disconnect cycles (10+) with no crash or heap corruption (check free heap before/after via serial log).
 
 ---
@@ -717,3 +717,4 @@ After each finding is resolved, update:
 |------|--------|
 | 2026-04-20 | Initial plan created from multi-agent review |
 | 2026-04-20 | F-01 completed — `m_sendMutex` added, test added (29 tests pass) |
+| 2026-04-20 | F-02 completed — cooperative task shutdown via semaphore + `shutdown()` |
