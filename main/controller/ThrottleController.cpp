@@ -15,6 +15,7 @@ ThrottleController::ThrottleController(WiThrottleClient* wiThrottleClient)
     , m_uiUpdateUserData(nullptr)
     , m_pollingTask(nullptr)
     , m_pollingRunning(false)
+    , m_cachedSpeedSteps(4)
 {
     // Create throttles
     for (int i = 0; i < NUM_THROTTLES; i++) {
@@ -59,6 +60,8 @@ void ThrottleController::initialize()
 {
     ESP_LOGI(TAG, "ThrottleController initialized with %d throttles and %d knobs",
              NUM_THROTTLES, NUM_KNOBS);
+    
+    reloadSpeedStepsFromNvs();
     
     // Start polling timer for state synchronization
     startPollingTimer();
@@ -688,6 +691,11 @@ void ThrottleController::stopPollingTimer()
 
 int ThrottleController::getSpeedStepsPerClick()
 {
+    return m_cachedSpeedSteps;
+}
+
+void ThrottleController::reloadSpeedStepsFromNvs()
+{
     nvs_handle_t handle;
     int32_t speedSteps = 4; // default
     
@@ -701,5 +709,6 @@ int ThrottleController::getSpeedStepsPerClick()
     if (speedSteps < 1) speedSteps = 1;
     if (speedSteps > 20) speedSteps = 20;
     
-    return (int)speedSteps;
+    m_cachedSpeedSteps = (int)speedSteps;
+    ESP_LOGI(TAG, "Speed steps per click: %d", m_cachedSpeedSteps);
 }

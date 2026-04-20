@@ -148,7 +148,13 @@ public:
      * @brief Get configured speed steps per knob click from NVS
      * @return Speed steps (default 4 if not configured)
      */
-    static int getSpeedStepsPerClick();
+    int getSpeedStepsPerClick();
+
+    /**
+     * @brief Reload speed-steps setting from NVS
+     * Call after changing the setting in the config screen.
+     */
+    void reloadSpeedStepsFromNvs();
 
 private:
     bool lockState(TickType_t timeout) const;
@@ -182,4 +188,5 @@ private:
     
     TaskHandle_t m_pollingTask;
     bool m_pollingRunning;
+    int m_cachedSpeedSteps;
 };

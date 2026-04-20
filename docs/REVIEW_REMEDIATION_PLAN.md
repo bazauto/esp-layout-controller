@@ -18,7 +18,7 @@
 | F-06 | [Raw pointer accessors bypass state mutex](#f-06-raw-pointer-accessors-bypass-state-mutex) | HIGH | Small | **Done** |
 | F-07 | [`m_powerStates` unprotected across threads](#f-07-m_powerstates-unprotected-across-threads) | HIGH | Small | **Done** |
 | F-08 | [Screen/callback ownership and lifecycle](#f-08-screencallback-ownership-and-lifecycle) | HIGH | Large | **Done** |
-| F-09 | [Polling timer blocks `esp_timer` task](#f-09-polling-timer-blocks-esp_timer-task) | HIGH | Medium | Not Started |
+| F-09 | [Polling timer blocks `esp_timer` task](#f-09-polling-timer-blocks-esp_timer-task) | HIGH | Medium | **Done** |
 | F-10 | [`pollThrottleStates()` bypasses `m_stateMutex`](#f-10-pollthrottlestates-bypasses-m_statemutex) | MEDIUM | Small | **Done** |
 | F-11 | [`sendJsonCommand()` masks errors](#f-11-sendjsoncommand-masks-errors) | MEDIUM | Small | Not Started |
 | F-12 | [Unbounded `messageBuffer` growth](#f-12-unbounded-messagebuffer-growth) | MEDIUM | Small | Not Started |
@@ -313,10 +313,10 @@ This depends on F-03 (screens owned by `AppController`).
 
 #### Acceptance Criteria
 
-- [ ] No `esp_timer` is used for throttle polling.
-- [ ] Polling runs on a dedicated FreeRTOS task with appropriate stack size.
+- [x] No `esp_timer` is used for throttle polling.
+- [x] Polling runs on a dedicated FreeRTOS task with appropriate stack size.
 - [ ] LVGL animations remain smooth during active polling (manual visual check).
-- [ ] Polling stops cleanly when `stopPolling()` is called.
+- [x] Polling stops cleanly when `stopPolling()` is called.
 
 ---
 
@@ -725,3 +725,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-14 completed — `lvgl_port_lock(200)` replaces `-1` in PowerStatusBar |
 | 2026-04-20 | F-03 completed — config screens stored as `unique_ptr` in AppController |
 | 2026-04-20 | F-08 completed — destructors deregister callbacks from shared services |
+| 2026-04-20 | F-09 completed — `esp_timer` replaced with dedicated FreeRTOS task |
