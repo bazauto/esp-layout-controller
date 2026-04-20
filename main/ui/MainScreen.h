@@ -65,15 +65,6 @@ private:
     static void onSettingsButtonClicked(lv_event_t* e);
     static void onJmriButtonClicked(lv_event_t* e);
     
-    // Test control event handlers
-    static void onAcquireButtonClicked(lv_event_t* e);
-    static void onSpeedButtonClicked(lv_event_t* e);
-    static void onForwardButtonClicked(lv_event_t* e);
-    static void onReverseButtonClicked(lv_event_t* e);
-    static void onF0ButtonClicked(lv_event_t* e);
-    static void onOldReleaseButtonClicked(lv_event_t* e);  // Old test button
-    
-    
     // LVGL UI components
     lv_obj_t* m_screen;
     lv_obj_t* m_leftPanel;

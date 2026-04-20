@@ -24,7 +24,7 @@
 | F-12 | [Unbounded `messageBuffer` growth](#f-12-unbounded-messagebuffer-growth) | MEDIUM | Small | Not Started |
 | F-13 | [NVS read on every encoder tick](#f-13-nvs-read-on-every-encoder-tick) | MEDIUM | Small | Not Started |
 | F-14 | [Infinite LVGL lock in PowerStatusBar](#f-14-infinite-lvgl-lock-in-powerstatusbar) | MEDIUM | Small | **Done** |
-| F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | Not Started |
+| F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | **Done** |
 | F-16 | [Unused Roster model class](#f-16-unused-roster-model-class) | LOW | Small | Not Started |
 | F-17 | [Duplicate speed/direction in Throttle and Locomotive](#f-17-duplicate-speeddirection-in-throttle-and-locomotive) | LOW | Small | Not Started |
 | F-18 | [WiFi password in plaintext NVS](#f-18-wifi-password-in-plaintext-nvs) | LOW | Small | Not Started |
@@ -460,9 +460,9 @@ Static methods `onAcquireButtonClicked`, `onSpeedButtonClicked`, `onForwardButto
 
 #### Acceptance Criteria
 
-- [ ] Dead handler methods are removed.
-- [ ] Project compiles cleanly.
-- [ ] No references to removed methods remain.
+- [x] Dead handler methods are removed.
+- [x] Project compiles cleanly.
+- [x] No references to removed methods remain.
 
 ---
 
@@ -726,3 +726,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-03 completed — config screens stored as `unique_ptr` in AppController |
 | 2026-04-20 | F-08 completed — destructors deregister callbacks from shared services |
 | 2026-04-20 | F-09 completed — `esp_timer` replaced with dedicated FreeRTOS task |
+| 2026-04-20 | F-15 completed — dead MainScreen test handlers removed |
