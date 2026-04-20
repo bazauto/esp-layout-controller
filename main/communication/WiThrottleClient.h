@@ -321,6 +321,7 @@ private:
 
     mutable SemaphoreHandle_t m_stateMutex;
     SemaphoreHandle_t m_sendMutex;
+    SemaphoreHandle_t m_taskExitSemaphore;
     
     TaskHandle_t m_receiveTaskHandle;
     bool m_running;

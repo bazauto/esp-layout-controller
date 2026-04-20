@@ -1,7 +1,7 @@
 # Review Remediation Plan
 
 **Created:** 2026-04-20
-**Status:** Planning
+**Status:** In Progress
 **Source:** Multi-agent project review (Claude Opus 4.6, GPT-5.4, Gemini 3.1)
 
 ---
@@ -10,7 +10,7 @@
 
 | ID | Finding | Severity | Effort | Status |
 |----|---------|----------|--------|--------|
-| F-01 | [Unserialized TCP `send()` in WiThrottleClient](#f-01-unserialized-tcp-send-in-withrottleclient) | CRITICAL | Small | Not Started |
+| F-01 | [Unserialized TCP `send()` in WiThrottleClient](#f-01-unserialized-tcp-send-in-withrottleclient) | CRITICAL | Small | **Done** |
 | F-02 | [Receive task lifecycle race in `disconnect()`](#f-02-receive-task-lifecycle-race-in-disconnect) | CRITICAL | Medium | Not Started |
 | F-03 | [Config screen memory leaks](#f-03-config-screen-memory-leaks) | HIGH | Medium | Not Started |
 | F-04 | [WiFi state callbacks bypass LVGL lock](#f-04-wifi-state-callbacks-bypass-lvgl-lock) | HIGH | Small | Not Started |
@@ -106,9 +106,9 @@ Low-risk code quality improvements.
 
 #### Acceptance Criteria
 
-- [ ] `sendCommand()` acquires `m_sendMutex` before calling `send()` and releases it after.
-- [ ] Timeout returns `ESP_ERR_TIMEOUT` rather than blocking indefinitely.
-- [ ] Existing unit tests pass (`ProtocolParsingTests`).
+- [x] `sendCommand()` acquires `m_sendMutex` before calling `send()` and releases it after.
+- [x] Timeout returns `ESP_ERR_TIMEOUT` rather than blocking indefinitely.
+- [x] Existing unit tests pass (`ProtocolParsingTests`) — 29 tests, 0 failures.
 - [ ] Manual test: rapid knob rotation while polling timer is active produces no garbled protocol output (verify via serial log).
 
 ---
@@ -716,3 +716,4 @@ After each finding is resolved, update:
 | Date | Change |
 |------|--------|
 | 2026-04-20 | Initial plan created from multi-agent review |
+| 2026-04-20 | F-01 completed — `m_sendMutex` added, test added (29 tests pass) |

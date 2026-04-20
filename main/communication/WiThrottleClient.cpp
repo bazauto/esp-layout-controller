@@ -25,6 +25,7 @@ WiThrottleClient::WiThrottleClient()
     , m_functionLabelsCallback(nullptr)
     , m_stateMutex(nullptr)
     , m_sendMutex(nullptr)
+    , m_taskExitSemaphore(nullptr)
     , m_receiveTaskHandle(nullptr)
     , m_running(false)
 {
@@ -35,6 +36,10 @@ WiThrottleClient::WiThrottleClient()
     m_sendMutex = xSemaphoreCreateMutex();
     if (!m_sendMutex) {
         ESP_LOGE(TAG, "Failed to create WiThrottle send mutex");
+    }
+    m_taskExitSemaphore = xSemaphoreCreateBinary();
+    if (!m_taskExitSemaphore) {
+        ESP_LOGE(TAG, "Failed to create WiThrottle task-exit semaphore");
     }
 }
 
@@ -48,6 +53,10 @@ WiThrottleClient::~WiThrottleClient()
     if (m_sendMutex) {
         vSemaphoreDelete(m_sendMutex);
         m_sendMutex = nullptr;
+    }
+    if (m_taskExitSemaphore) {
+        vSemaphoreDelete(m_taskExitSemaphore);
+        m_taskExitSemaphore = nullptr;
     }
 }
 
@@ -135,11 +144,15 @@ void WiThrottleClient::disconnect()
         ESP_LOGI(TAG, "Disconnecting from WiThrottle server");
         m_running = false;
         
-        // Wait for receive task to finish
-        if (m_receiveTaskHandle) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            if (eTaskGetState(m_receiveTaskHandle) != eDeleted) {
-                vTaskDelete(m_receiveTaskHandle);
+        // Unblock recv() by shutting down the socket read side
+        shutdown(m_socket, SHUT_RDWR);
+        
+        // Wait for receive task to exit cooperatively (up to 2 seconds)
+        if (m_receiveTaskHandle && m_taskExitSemaphore) {
+            if (xSemaphoreTake(m_taskExitSemaphore, pdMS_TO_TICKS(2000)) == pdTRUE) {
+                ESP_LOGI(TAG, "Receive task exited cleanly");
+            } else {
+                ESP_LOGW(TAG, "Receive task did not exit within timeout");
             }
             m_receiveTaskHandle = nullptr;
         }
@@ -538,6 +551,11 @@ void WiThrottleClient::receiveTask(void* arg)
     if (client->m_state == ConnectionState::CONNECTED) {
         ESP_LOGW(TAG, "Connection lost");
         client->setState(ConnectionState::DISCONNECTED);
+    }
+    
+    // Signal disconnect() that we have exited
+    if (client->m_taskExitSemaphore) {
+        xSemaphoreGive(client->m_taskExitSemaphore);
     }
     
     vTaskDelete(nullptr);
