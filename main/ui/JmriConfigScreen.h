@@ -19,13 +19,15 @@
  */
 class WiFiController;
 class RotaryEncoderHal;
+class ThrottleController;
 
 class JmriConfigScreen {
 public:
     explicit JmriConfigScreen(JmriJsonClient& jsonClient,
                               WiThrottleClient& wiThrottleClient,
                               WiFiController* wifiController,
-                              RotaryEncoderHal* encoderHal);
+                              RotaryEncoderHal* encoderHal,
+                              ThrottleController* throttleController);
     ~JmriConfigScreen();
     
     // Delete copy/move
@@ -95,6 +97,7 @@ private:
     WiThrottleClient& m_wiThrottleClient;
     WiFiController* m_wifiController;
     RotaryEncoderHal* m_encoderHal;
+    ThrottleController* m_throttleController;
     
     // Constants
     static constexpr int SCREEN_WIDTH = 800;

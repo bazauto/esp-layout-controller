@@ -22,7 +22,7 @@
 | F-10 | [`pollThrottleStates()` bypasses `m_stateMutex`](#f-10-pollthrottlestates-bypasses-m_statemutex) | MEDIUM | Small | **Done** |
 | F-11 | [`sendJsonCommand()` masks errors](#f-11-sendjsoncommand-masks-errors) | MEDIUM | Small | **Done** |
 | F-12 | [Unbounded `messageBuffer` growth](#f-12-unbounded-messagebuffer-growth) | MEDIUM | Small | **Done** |
-| F-13 | [NVS read on every encoder tick](#f-13-nvs-read-on-every-encoder-tick) | MEDIUM | Small | Not Started |
+| F-13 | [NVS read on every encoder tick](#f-13-nvs-read-on-every-encoder-tick) | MEDIUM | Small | **Done** |
 | F-14 | [Infinite LVGL lock in PowerStatusBar](#f-14-infinite-lvgl-lock-in-powerstatusbar) | MEDIUM | Small | **Done** |
 | F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | **Done** |
 | F-16 | [Unused Roster model class](#f-16-unused-roster-model-class) | LOW | Small | Not Started |
@@ -415,8 +415,8 @@ The `messageBuffer` string in `WiThrottleClient::receiveTask()` accumulates data
 
 #### Acceptance Criteria
 
-- [ ] NVS is read once at initialisation, not on every encoder event.
-- [ ] Changing the setting via the settings screen takes effect without restart.
+- [x] NVS is read once at initialisation, not on every encoder event.
+- [x] Changing the setting via the settings screen takes effect without restart.
 - [ ] Encoder responsiveness is at least as good as before (subjective manual test).
 
 ---
@@ -729,3 +729,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-15 completed — dead MainScreen test handlers removed |
 | 2026-04-20 | F-11 completed — `sendJsonCommand()` now returns real failure when disconnected |
 | 2026-04-20 | F-12 completed — `messageBuffer` capped at 4 KiB |
+| 2026-04-20 | F-13 completed — cached speed-step setting now reloads immediately from settings |

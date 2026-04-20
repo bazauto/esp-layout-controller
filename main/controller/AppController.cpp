@@ -123,7 +123,8 @@ void AppController::showJmriConfigScreen()
     m_jmriConfigScreen = std::make_unique<JmriConfigScreen>(*m_jmriClient,
                                        *m_wiThrottleClient,
                                        m_wifiController.get(),
-                                       m_rotaryEncoderHal.get());
+                                       m_rotaryEncoderHal.get(),
+                                       m_throttleController.get());
     m_jmriConfigScreen->create();
 }
 

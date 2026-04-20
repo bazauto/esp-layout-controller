@@ -1,6 +1,7 @@
 #include "JmriConfigScreen.h"
 #include "wrappers/main_screen_wrapper.h"
 #include "esp_log.h"
+#include "../controller/ThrottleController.h"
 #include "../controller/WiFiController.h"
 #include "../hardware/RotaryEncoderHal.h"
 #include "esp_app_desc.h"
@@ -27,7 +28,8 @@ static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
                                    WiThrottleClient& wiThrottleClient,
                                    WiFiController* wifiController,
-                                   RotaryEncoderHal* encoderHal)
+                                   RotaryEncoderHal* encoderHal,
+                                   ThrottleController* throttleController)
     : m_screen(nullptr)
     , m_serverIpInput(nullptr)
     , m_wiThrottlePortInput(nullptr)
@@ -49,6 +51,7 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
     , m_wiThrottleClient(wiThrottleClient)
     , m_wifiController(wifiController)
     , m_encoderHal(encoderHal)
+    , m_throttleController(throttleController)
 {
 }
 
@@ -496,6 +499,10 @@ void JmriConfigScreen::saveSettings()
     
     nvs_commit(handle);
     nvs_close(handle);
+
+    if (m_throttleController) {
+        m_throttleController->reloadSpeedStepsFromNvs();
+    }
     
     ESP_LOGI(TAG, "JMRI settings saved (Power Manager: %s, Speed Steps: %d)", powerMgr.c_str(), speedSteps);
 }
