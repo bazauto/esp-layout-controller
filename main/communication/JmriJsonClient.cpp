@@ -45,16 +45,25 @@ JmriJsonClient::JmriJsonClient()
     , m_serverHost("")
     , m_serverPort(12080)
     , m_heartbeatTask(nullptr)
-    , m_configuredPowerName("DCC++")  // Default to DCC++
+    , m_configuredPowerName("DCC++")
+    , m_powerMutex(nullptr)
     , m_powerCallback(nullptr)
     , m_connectionCallback(nullptr)
 {
+    m_powerMutex = xSemaphoreCreateMutex();
+    if (!m_powerMutex) {
+        ESP_LOGE(TAG, "Failed to create power mutex");
+    }
 }
 
 JmriJsonClient::~JmriJsonClient()
 {
     stopHeartbeat();
     disconnect();
+    if (m_powerMutex) {
+        vSemaphoreDelete(m_powerMutex);
+        m_powerMutex = nullptr;
+    }
 }
 
 esp_err_t JmriJsonClient::initialize()
@@ -147,7 +156,10 @@ void JmriJsonClient::disconnect()
     }
     
     setState(ConnectionState::DISCONNECTED);
-    m_powerStates.clear();
+    if (m_powerMutex && xSemaphoreTake(m_powerMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        m_powerStates.clear();
+        xSemaphoreGive(m_powerMutex);
+    }
 }
 
 esp_err_t JmriJsonClient::setPower(bool on)
@@ -176,11 +188,15 @@ esp_err_t JmriJsonClient::setPower(bool on)
 
 JmriJsonClient::PowerState JmriJsonClient::getPower() const
 {
-    auto it = m_powerStates.find(m_configuredPowerName);
-    if (it != m_powerStates.end()) {
-        return it->second;
+    PowerState result = PowerState::UNKNOWN;
+    if (m_powerMutex && xSemaphoreTake(m_powerMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        auto it = m_powerStates.find(m_configuredPowerName);
+        if (it != m_powerStates.end()) {
+            result = it->second;
+        }
+        xSemaphoreGive(m_powerMutex);
     }
-    return PowerState::UNKNOWN;
+    return result;
 }
 
 esp_err_t JmriJsonClient::requestPowerList()
@@ -323,10 +339,13 @@ void JmriJsonClient::handlePowerMessage(const std::string& type, const std::stri
     
     // Update cached state
     bool stateChanged = false;
-    auto it = m_powerStates.find(name);
-    if (it == m_powerStates.end() || it->second != newState) {
-        m_powerStates[name] = newState;
-        stateChanged = true;
+    if (m_powerMutex && xSemaphoreTake(m_powerMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        auto it = m_powerStates.find(name);
+        if (it == m_powerStates.end() || it->second != newState) {
+            m_powerStates[name] = newState;
+            stateChanged = true;
+        }
+        xSemaphoreGive(m_powerMutex);
     }
     
     // Only notify callback for the configured power manager

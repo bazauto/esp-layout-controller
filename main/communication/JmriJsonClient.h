@@ -5,6 +5,8 @@
 #include <functional>
 #include "esp_err.h"
 #include "esp_websocket_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "sdkconfig.h"
 
 /**
@@ -173,6 +175,7 @@ private:
     
     // Power states for known districts
     std::map<std::string, PowerState> m_powerStates;
+    SemaphoreHandle_t m_powerMutex;
     
     PowerStateCallback m_powerCallback;
     ConnectionStateCallback m_connectionCallback;
