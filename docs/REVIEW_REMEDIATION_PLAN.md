@@ -20,8 +20,8 @@
 | F-08 | [Screen/callback ownership and lifecycle](#f-08-screencallback-ownership-and-lifecycle) | HIGH | Large | **Done** |
 | F-09 | [Polling timer blocks `esp_timer` task](#f-09-polling-timer-blocks-esp_timer-task) | HIGH | Medium | **Done** |
 | F-10 | [`pollThrottleStates()` bypasses `m_stateMutex`](#f-10-pollthrottlestates-bypasses-m_statemutex) | MEDIUM | Small | **Done** |
-| F-11 | [`sendJsonCommand()` masks errors](#f-11-sendjsoncommand-masks-errors) | MEDIUM | Small | Not Started |
-| F-12 | [Unbounded `messageBuffer` growth](#f-12-unbounded-messagebuffer-growth) | MEDIUM | Small | Not Started |
+| F-11 | [`sendJsonCommand()` masks errors](#f-11-sendjsoncommand-masks-errors) | MEDIUM | Small | **Done** |
+| F-12 | [Unbounded `messageBuffer` growth](#f-12-unbounded-messagebuffer-growth) | MEDIUM | Small | **Done** |
 | F-13 | [NVS read on every encoder tick](#f-13-nvs-read-on-every-encoder-tick) | MEDIUM | Small | Not Started |
 | F-14 | [Infinite LVGL lock in PowerStatusBar](#f-14-infinite-lvgl-lock-in-powerstatusbar) | MEDIUM | Small | **Done** |
 | F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | **Done** |
@@ -366,9 +366,9 @@ Note: If F-09 is implemented first (dedicated task), this fix is naturally incor
 
 #### Acceptance Criteria
 
-- [ ] `sendJsonCommand()` returns `ESP_FAIL` when the connection is down.
-- [ ] The known library quirk is documented in a code comment.
-- [ ] Callers that need to react to send failure do so (or at minimum, the error is logged at WARN level).
+- [x] `sendJsonCommand()` returns `ESP_FAIL` when the connection is down.
+- [x] The known library quirk is documented in a code comment.
+- [x] Callers that need to react to send failure do so (or at minimum, the error is logged at WARN level).
 
 ---
 
@@ -390,9 +390,9 @@ The `messageBuffer` string in `WiThrottleClient::receiveTask()` accumulates data
 
 #### Acceptance Criteria
 
-- [ ] `messageBuffer` is capped at 4 KB.
-- [ ] Exceeding the cap logs a warning and clears the buffer.
-- [ ] Normal WiThrottle protocol messages (well under 4 KB) are unaffected.
+- [x] `messageBuffer` is capped at 4 KB.
+- [x] Exceeding the cap logs a warning and clears the buffer.
+- [x] Normal WiThrottle protocol messages (well under 4 KB) are unaffected.
 
 ---
 
@@ -727,3 +727,5 @@ After each finding is resolved, update:
 | 2026-04-20 | F-08 completed — destructors deregister callbacks from shared services |
 | 2026-04-20 | F-09 completed — `esp_timer` replaced with dedicated FreeRTOS task |
 | 2026-04-20 | F-15 completed — dead MainScreen test handlers removed |
+| 2026-04-20 | F-11 completed — `sendJsonCommand()` now returns real failure when disconnected |
+| 2026-04-20 | F-12 completed — `messageBuffer` capped at 4 KiB |
