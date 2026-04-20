@@ -378,17 +378,20 @@ esp_err_t JmriJsonClient::sendJsonCommand(const std::string& type, const std::st
     // Send with reasonable timeout
     int sent = esp_websocket_client_send_text(m_client, message.c_str(), message.length(), pdMS_TO_TICKS(1000));
     
-    // The ESP WebSocket client returns the number of bytes sent on success, or -1 on error
-    // However, it seems to return -1 even when the message is successfully queued/sent
-    // This appears to be a quirk or bug in the library
+    // The ESP WebSocket client returns the number of bytes sent on success, or -1 on error.
+    // A negative return while the connection is down indicates a real failure.
+    // A negative return while still connected appears to be a library quirk (ESP-IDF
+    // WebSocket client can return -1 for queued sends); treat as success with a warning.
     if (sent < 0) {
-        // Log as warning but don't treat as fatal error since commands seem to work
-        ESP_LOGW(TAG, "WebSocket send returned %d (message may still have been sent)", sent);
+        if (!esp_websocket_client_is_connected(m_client)) {
+            ESP_LOGE(TAG, "WebSocket send failed (disconnected)");
+            return ESP_FAIL;
+        }
+        ESP_LOGW(TAG, "WebSocket send returned %d (connected; likely library quirk)", sent);
     } else {
         ESP_LOGD(TAG, "Sent %d bytes: %s", sent, message.c_str());
     }
     
-    // Always return OK since the commands actually work despite the error return
     return ESP_OK;
 }
 

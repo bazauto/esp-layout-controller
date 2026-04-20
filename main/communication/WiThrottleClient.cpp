@@ -535,6 +535,13 @@ void WiThrottleClient::receiveTask(void* arg)
         buffer[len] = '\0';
         messageBuffer += buffer;
         
+        // Guard against unbounded growth (e.g. server sends data with no newlines)
+        static constexpr size_t MAX_MESSAGE_BUFFER = 8192;
+        if (messageBuffer.size() > MAX_MESSAGE_BUFFER) {
+            ESP_LOGW(TAG, "Message buffer exceeded %zu bytes — discarding", MAX_MESSAGE_BUFFER);
+            messageBuffer.clear();
+        }
+        
         // Process complete messages (separated by newline)
         size_t pos;
         while ((pos = messageBuffer.find('\n')) != std::string::npos) {
