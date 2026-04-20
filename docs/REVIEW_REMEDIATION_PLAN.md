@@ -25,7 +25,7 @@
 | F-13 | [NVS read on every encoder tick](#f-13-nvs-read-on-every-encoder-tick) | MEDIUM | Small | **Done** |
 | F-14 | [Infinite LVGL lock in PowerStatusBar](#f-14-infinite-lvgl-lock-in-powerstatusbar) | MEDIUM | Small | **Done** |
 | F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | **Done** |
-| F-16 | [Unused Roster model class](#f-16-unused-roster-model-class) | LOW | Small | Not Started |
+| F-16 | [Unused Roster model class](#f-16-unused-roster-model-class) | LOW | Small | **Done** |
 | F-17 | [Duplicate speed/direction in Throttle and Locomotive](#f-17-duplicate-speeddirection-in-throttle-and-locomotive) | LOW | Small | Not Started |
 | F-18 | [WiFi password in plaintext NVS](#f-18-wifi-password-in-plaintext-nvs) | LOW | Small | Not Started |
 
@@ -486,8 +486,8 @@ Recommendation: **Option A** — the vector approach works fine and the Roster c
 
 #### Acceptance Criteria
 
-- [ ] No dead roster code remains (or the class is fully integrated).
-- [ ] All tests pass.
+- [x] No dead roster code remains (or the class is fully integrated).
+- [x] All tests pass — 26 tests, 0 failures.
 
 ---
 
@@ -730,3 +730,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-11 completed — `sendJsonCommand()` now returns real failure when disconnected |
 | 2026-04-20 | F-12 completed — `messageBuffer` capped at 4 KiB |
 | 2026-04-20 | F-13 completed — cached speed-step setting now reloads immediately from settings |
+| 2026-04-20 | F-16 completed — removed unused Roster model and isolated roster tests |

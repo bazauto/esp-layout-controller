@@ -9,7 +9,6 @@ set(APP_SRCS
     # Model layer (C++)
     "model/Locomotive.cpp"
     "model/Throttle.cpp"
-    "model/Roster.cpp"
     "model/Knob.cpp"
 
     # Hardware layer (C++)
@@ -46,7 +45,6 @@ if(CONFIG_THROTTLE_TESTS)
     list(APPEND APP_SRCS
         "tests/ThrottleControllerTests.cpp"
         "tests/LocomotiveTests.cpp"
-        "tests/ModelRosterTests.cpp"
         "tests/ProtocolParsingTests.cpp"
         "tests/ThrottleModelTests.cpp"
         "tests/TestRunner.cpp"
