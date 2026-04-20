@@ -23,7 +23,7 @@
 | F-11 | [`sendJsonCommand()` masks errors](#f-11-sendjsoncommand-masks-errors) | MEDIUM | Small | Not Started |
 | F-12 | [Unbounded `messageBuffer` growth](#f-12-unbounded-messagebuffer-growth) | MEDIUM | Small | Not Started |
 | F-13 | [NVS read on every encoder tick](#f-13-nvs-read-on-every-encoder-tick) | MEDIUM | Small | Not Started |
-| F-14 | [Infinite LVGL lock in PowerStatusBar](#f-14-infinite-lvgl-lock-in-powerstatusbar) | MEDIUM | Small | Not Started |
+| F-14 | [Infinite LVGL lock in PowerStatusBar](#f-14-infinite-lvgl-lock-in-powerstatusbar) | MEDIUM | Small | **Done** |
 | F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | Not Started |
 | F-16 | [Unused Roster model class](#f-16-unused-roster-model-class) | LOW | Small | Not Started |
 | F-17 | [Duplicate speed/direction in Throttle and Locomotive](#f-17-duplicate-speeddirection-in-throttle-and-locomotive) | LOW | Small | Not Started |
@@ -438,8 +438,8 @@ The `messageBuffer` string in `WiThrottleClient::receiveTask()` accumulates data
 
 #### Acceptance Criteria
 
-- [ ] All `lvgl_port_lock` calls in `PowerStatusBar` use a finite timeout (≤ 200ms).
-- [ ] Power state changes still update the UI under normal conditions.
+- [x] All `lvgl_port_lock` calls in `PowerStatusBar` use a finite timeout (≤ 200ms).
+- [x] Power state changes still update the UI under normal conditions.
 - [ ] JMRI WebSocket connection does not time out during heavy UI activity.
 
 ---
@@ -722,3 +722,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-06 completed — accessors gated behind `CONFIG_THROTTLE_TESTS`, `getRoster()` made private |
 | 2026-04-20 | F-07 completed — `m_powerMutex` added to `JmriJsonClient` |
 | 2026-04-20 | F-10 completed — snapshot-then-query pattern in `pollThrottleStates()` |
+| 2026-04-20 | F-14 completed — `lvgl_port_lock(200)` replaces `-1` in PowerStatusBar |

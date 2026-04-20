@@ -6,6 +6,8 @@ class WiThrottleClient;
 class JmriJsonClient;
 class ThrottleController;
 class MainScreen;
+class WiFiConfigScreen;
+class JmriConfigScreen;
 class WiFiController;
 class JmriConnectionController;
 class RotaryEncoderHal;
@@ -38,6 +40,8 @@ private:
     AppController();
 
     std::unique_ptr<MainScreen> m_mainScreen;
+    std::unique_ptr<WiFiConfigScreen> m_wifiConfigScreen;
+    std::unique_ptr<JmriConfigScreen> m_jmriConfigScreen;
     std::unique_ptr<WiThrottleClient> m_wiThrottleClient;
     std::unique_ptr<JmriJsonClient> m_jmriClient;
     std::unique_ptr<ThrottleController> m_throttleController;
