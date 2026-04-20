@@ -89,12 +89,21 @@ public:
      */
     void onThrottleFunctions(int throttleId);
     
+#if CONFIG_THROTTLE_TESTS
     /**
-     * @brief Get throttle model
+     * @brief Get throttle model (test-only — bypasses mutex)
      * @param throttleId Throttle ID (0-3)
      * @return Throttle pointer or nullptr
      */
     Throttle* getThrottle(int throttleId);
+
+    /**
+     * @brief Get knob model (test-only — bypasses mutex)
+     * @param knobId Knob ID (0-1)
+     * @return Knob pointer or nullptr
+     */
+    Knob* getKnob(int knobId);
+#endif
 
     /**
      * @brief Get a thread-safe snapshot of a throttle's state
@@ -117,14 +126,7 @@ public:
      * @brief Get a specific function state
      */
     bool getFunctionState(int throttleId, int functionNumber, bool& outState) const;
-    
-    /**
-     * @brief Get knob model
-     * @param knobId Knob ID (0-1)
-     * @return Knob pointer or nullptr
-     */
-    Knob* getKnob(int knobId);
-    
+
     /**
      * @brief Get current roster size
      */

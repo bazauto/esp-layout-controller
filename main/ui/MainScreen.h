@@ -57,13 +57,6 @@ public:
      * @brief Update all throttle displays
      */
     void updateAllThrottles();
-    
-    /**
-     * @brief Get the throttle model by ID
-     * @param throttleId Throttle ID (0-3)
-     * @return Pointer to throttle or nullptr if invalid ID
-     */
-    Throttle* getThrottle(int throttleId);
 
 private:
     void createRosterPanel(lv_obj_t* parent);

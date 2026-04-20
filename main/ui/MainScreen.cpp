@@ -286,11 +286,6 @@ void MainScreen::updateAllThrottles()
         }
     }
 }
-Throttle* MainScreen::getThrottle(int throttleId)
-{
-    if (!m_throttleController) return nullptr;
-    return m_throttleController->getThrottle(throttleId);
-}
 
 // Test control event handlers
 void MainScreen::onAcquireButtonClicked(lv_event_t* e)

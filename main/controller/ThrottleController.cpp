@@ -332,6 +332,7 @@ void ThrottleController::onThrottleFunctions(int throttleId)
     ESP_LOGI(TAG, "Functions button pressed for throttle %d", throttleId);
 }
 
+#if CONFIG_THROTTLE_TESTS
 Throttle* ThrottleController::getThrottle(int throttleId)
 {
     if (throttleId >= 0 && throttleId < NUM_THROTTLES) {
@@ -347,6 +348,7 @@ Knob* ThrottleController::getKnob(int knobId)
     }
     return nullptr;
 }
+#endif
 
 size_t ThrottleController::getRosterSize() const
 {

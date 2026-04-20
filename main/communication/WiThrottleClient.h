@@ -238,11 +238,6 @@ public:
      * @brief Set function labels callback
      */
     void setFunctionLabelsCallback(FunctionLabelsCallback callback) { m_functionLabelsCallback = callback; }
-    
-    /**
-    * @brief Get current roster (not thread-safe; prefer getRosterSnapshot/getRosterEntry)
-     */
-    const std::vector<Locomotive>& getRoster() const { return m_roster; }
 
     /**
     * @brief Get a copy of the current roster (thread-safe)
@@ -279,6 +274,8 @@ public:
     void sendHeartbeat();
 
 private:
+    const std::vector<Locomotive>& getRoster() const { return m_roster; }
+
     bool lockState(TickType_t timeout) const;
     void unlockState() const;
 

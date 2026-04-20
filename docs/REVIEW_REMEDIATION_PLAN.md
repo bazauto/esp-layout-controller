@@ -13,7 +13,7 @@
 | F-01 | [Unserialized TCP `send()` in WiThrottleClient](#f-01-unserialized-tcp-send-in-withrottleclient) | CRITICAL | Small | **Done** |
 | F-02 | [Receive task lifecycle race in `disconnect()`](#f-02-receive-task-lifecycle-race-in-disconnect) | CRITICAL | Medium | **Done** |
 | F-03 | [Config screen memory leaks](#f-03-config-screen-memory-leaks) | HIGH | Medium | Not Started |
-| F-04 | [WiFi state callbacks bypass LVGL lock](#f-04-wifi-state-callbacks-bypass-lvgl-lock) | HIGH | Small | Not Started |
+| F-04 | [WiFi state callbacks bypass LVGL lock](#f-04-wifi-state-callbacks-bypass-lvgl-lock) | HIGH | Small | **Done** |
 | F-05 | [Blocking I/O in LVGL event handlers](#f-05-blocking-io-in-lvgl-event-handlers) | HIGH | Large | Not Started |
 | F-06 | [Raw pointer accessors bypass state mutex](#f-06-raw-pointer-accessors-bypass-state-mutex) | HIGH | Small | Not Started |
 | F-07 | [`m_powerStates` unprotected across threads](#f-07-m_powerstates-unprotected-across-threads) | HIGH | Small | Not Started |
@@ -186,8 +186,8 @@ Low-risk code quality improvements.
 
 #### Acceptance Criteria
 
-- [ ] All LVGL widget access in WiFi state callbacks is guarded by `lvgl_port_lock()`.
-- [ ] Lock timeout is finite (200ms).
+- [x] All LVGL widget access in WiFi state callbacks is guarded by `lvgl_port_lock()`.
+- [x] Lock timeout is finite (200ms).
 - [ ] Manual test: connecting/disconnecting WiFi while on the WiFi config screen causes no UI corruption or crash.
 
 ---
@@ -718,3 +718,4 @@ After each finding is resolved, update:
 | 2026-04-20 | Initial plan created from multi-agent review |
 | 2026-04-20 | F-01 completed — `m_sendMutex` added, test added (29 tests pass) |
 | 2026-04-20 | F-02 completed — cooperative task shutdown via semaphore + `shutdown()` |
+| 2026-04-20 | F-04 completed — `lvgl_port_lock(200)` in WiFi state callback |
