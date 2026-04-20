@@ -19,7 +19,7 @@
 | F-07 | [`m_powerStates` unprotected across threads](#f-07-m_powerstates-unprotected-across-threads) | HIGH | Small | **Done** |
 | F-08 | [Screen/callback ownership and lifecycle](#f-08-screencallback-ownership-and-lifecycle) | HIGH | Large | Not Started |
 | F-09 | [Polling timer blocks `esp_timer` task](#f-09-polling-timer-blocks-esp_timer-task) | HIGH | Medium | Not Started |
-| F-10 | [`pollThrottleStates()` bypasses `m_stateMutex`](#f-10-pollthrottlestates-bypasses-m_statemutex) | MEDIUM | Small | Not Started |
+| F-10 | [`pollThrottleStates()` bypasses `m_stateMutex`](#f-10-pollthrottlestates-bypasses-m_statemutex) | MEDIUM | Small | **Done** |
 | F-11 | [`sendJsonCommand()` masks errors](#f-11-sendjsoncommand-masks-errors) | MEDIUM | Small | Not Started |
 | F-12 | [Unbounded `messageBuffer` growth](#f-12-unbounded-messagebuffer-growth) | MEDIUM | Small | Not Started |
 | F-13 | [NVS read on every encoder tick](#f-13-nvs-read-on-every-encoder-tick) | MEDIUM | Small | Not Started |
@@ -341,9 +341,9 @@ Note: If F-09 is implemented first (dedicated task), this fix is naturally incor
 
 #### Acceptance Criteria
 
-- [ ] Throttle state reads in `pollThrottleStates()` are protected by `m_stateMutex`.
-- [ ] The mutex is released before any network I/O.
-- [ ] Existing unit tests pass.
+- [x] Throttle state reads in `pollThrottleStates()` are protected by `m_stateMutex`.
+- [x] The mutex is released before any network I/O.
+- [x] Existing unit tests pass — 29 tests, 0 failures.
 
 ---
 
@@ -721,3 +721,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-04 completed — `lvgl_port_lock(200)` in WiFi state callback |
 | 2026-04-20 | F-06 completed — accessors gated behind `CONFIG_THROTTLE_TESTS`, `getRoster()` made private |
 | 2026-04-20 | F-07 completed — `m_powerMutex` added to `JmriJsonClient` |
+| 2026-04-20 | F-10 completed — snapshot-then-query pattern in `pollThrottleStates()` |

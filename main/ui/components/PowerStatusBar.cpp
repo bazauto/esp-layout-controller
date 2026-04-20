@@ -47,14 +47,14 @@ lv_obj_t* PowerStatusBar::create(lv_obj_t* parent, JmriJsonClient* jmriClient)
 
         m_jmriClient->setPowerStateCallback([this](const std::string& powerName, JmriJsonClient::PowerState state) {
             (void)powerName;
-            if (lvgl_port_lock(-1)) {
+            if (lvgl_port_lock(200)) {
                 updateTrackPowerButton(state);
                 lvgl_port_unlock();
             }
         });
 
         m_jmriClient->setConnectionStateCallback([this](JmriJsonClient::ConnectionState state) {
-            if (lvgl_port_lock(-1)) {
+            if (lvgl_port_lock(200)) {
                 updateConnectionStatus(state);
                 lvgl_port_unlock();
             }
