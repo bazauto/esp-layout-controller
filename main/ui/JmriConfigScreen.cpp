@@ -54,7 +54,9 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
 
 JmriConfigScreen::~JmriConfigScreen()
 {
-    // Don't delete LVGL objects - LVGL manages screen lifecycle
+    // Deregister callbacks to prevent dangling this pointer
+    m_jsonClient.setConnectionStateCallback(nullptr);
+    m_wiThrottleClient.setConnectionStateCallback(nullptr);
 }
 
 lv_obj_t* JmriConfigScreen::create()

@@ -17,6 +17,14 @@ PowerStatusBar::PowerStatusBar()
 {
 }
 
+PowerStatusBar::~PowerStatusBar()
+{
+    if (m_jmriClient) {
+        m_jmriClient->setPowerStateCallback(nullptr);
+        m_jmriClient->setConnectionStateCallback(nullptr);
+    }
+}
+
 lv_obj_t* PowerStatusBar::create(lv_obj_t* parent, JmriJsonClient* jmriClient)
 {
     m_jmriClient = jmriClient;

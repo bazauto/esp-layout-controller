@@ -12,7 +12,7 @@
 |----|---------|----------|--------|--------|
 | F-01 | [Unserialized TCP `send()` in WiThrottleClient](#f-01-unserialized-tcp-send-in-withrottleclient) | CRITICAL | Small | **Done** |
 | F-02 | [Receive task lifecycle race in `disconnect()`](#f-02-receive-task-lifecycle-race-in-disconnect) | CRITICAL | Medium | **Done** |
-| F-03 | [Config screen memory leaks](#f-03-config-screen-memory-leaks) | HIGH | Medium | Not Started |
+| F-03 | [Config screen memory leaks](#f-03-config-screen-memory-leaks) | HIGH | Medium | **Done** |
 | F-04 | [WiFi state callbacks bypass LVGL lock](#f-04-wifi-state-callbacks-bypass-lvgl-lock) | HIGH | Small | **Done** |
 | F-05 | [Blocking I/O in LVGL event handlers](#f-05-blocking-io-in-lvgl-event-handlers) | HIGH | Large | Not Started |
 | F-06 | [Raw pointer accessors bypass state mutex](#f-06-raw-pointer-accessors-bypass-state-mutex) | HIGH | Small | **Done** |
@@ -163,7 +163,7 @@ Low-risk code quality improvements.
 
 #### Acceptance Criteria
 
-- [ ] Config screens are stored as `unique_ptr` members of `AppController`.
+- [x] Config screens are stored as `unique_ptr` members of `AppController`.
 - [ ] Navigating to WiFi/JMRI settings and back 20 times does not grow heap usage (verify via `esp_get_free_heap_size()` logged before/after).
 - [ ] Config screen destructors properly clean up LVGL objects and deregister callbacks.
 
@@ -723,3 +723,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-07 completed — `m_powerMutex` added to `JmriJsonClient` |
 | 2026-04-20 | F-10 completed — snapshot-then-query pattern in `pollThrottleStates()` |
 | 2026-04-20 | F-14 completed — `lvgl_port_lock(200)` replaces `-1` in PowerStatusBar |
+| 2026-04-20 | F-03 completed — config screens stored as `unique_ptr` in AppController |

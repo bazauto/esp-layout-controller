@@ -9,7 +9,7 @@
 class PowerStatusBar {
 public:
     PowerStatusBar();
-    ~PowerStatusBar() = default;
+    ~PowerStatusBar();
 
     // Delete copy/move
     PowerStatusBar(const PowerStatusBar&) = delete;

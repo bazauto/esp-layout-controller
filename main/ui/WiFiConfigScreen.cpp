@@ -38,7 +38,8 @@ WiFiConfigScreen::WiFiConfigScreen(WiFiManager& wifiManager)
 
 WiFiConfigScreen::~WiFiConfigScreen()
 {
-    // Don't delete LVGL objects - LVGL manages screen lifecycle
+    // Deregister callback to prevent dangling this pointer
+    m_wifiManager.setStateCallback(nullptr);
 }
 
 lv_obj_t* WiFiConfigScreen::create()
