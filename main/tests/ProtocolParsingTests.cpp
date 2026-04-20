@@ -62,9 +62,25 @@ static void test_jmri_power_parsing(void)
     TEST_ASSERT_EQUAL((int)JmriJsonClient::PowerState::ON, (int)client.getPower());
 }
 
+static void test_withrottle_send_returns_error_when_disconnected(void)
+{
+    WiThrottleClient client;
+    client.initialize();
+
+    // All command methods should return ESP_ERR_INVALID_STATE when not connected
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.setSpeed('0', 50));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.setDirection('0', true));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.setFunction('0', 0, true));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.querySpeed('0'));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.queryDirection('0'));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.acquireLocomotive('0', 3, false));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.releaseLocomotive('0'));
+}
+
 extern "C" void register_protocol_tests(void)
 {
     RUN_TEST(test_withrottle_roster_parsing);
     RUN_TEST(test_withrottle_throttle_update_parsing);
     RUN_TEST(test_jmri_power_parsing);
+    RUN_TEST(test_withrottle_send_returns_error_when_disconnected);
 }

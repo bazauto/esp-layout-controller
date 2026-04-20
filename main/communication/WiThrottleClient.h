@@ -320,6 +320,7 @@ private:
     ThrottleStateCallback m_throttleCallback;
 
     mutable SemaphoreHandle_t m_stateMutex;
+    SemaphoreHandle_t m_sendMutex;
     
     TaskHandle_t m_receiveTaskHandle;
     bool m_running;

@@ -24,12 +24,17 @@ WiThrottleClient::WiThrottleClient()
     , m_webPortCallback(nullptr)
     , m_functionLabelsCallback(nullptr)
     , m_stateMutex(nullptr)
+    , m_sendMutex(nullptr)
     , m_receiveTaskHandle(nullptr)
     , m_running(false)
 {
     m_stateMutex = xSemaphoreCreateMutex();
     if (!m_stateMutex) {
         ESP_LOGE(TAG, "Failed to create WiThrottle state mutex");
+    }
+    m_sendMutex = xSemaphoreCreateMutex();
+    if (!m_sendMutex) {
+        ESP_LOGE(TAG, "Failed to create WiThrottle send mutex");
     }
 }
 
@@ -39,6 +44,10 @@ WiThrottleClient::~WiThrottleClient()
     if (m_stateMutex) {
         vSemaphoreDelete(m_stateMutex);
         m_stateMutex = nullptr;
+    }
+    if (m_sendMutex) {
+        vSemaphoreDelete(m_sendMutex);
+        m_sendMutex = nullptr;
     }
 }
 
@@ -662,15 +671,24 @@ esp_err_t WiThrottleClient::sendCommand(const std::string& command)
         return ESP_ERR_INVALID_STATE;
     }
     
+    // Serialise send() across tasks (main, polling timer, receive heartbeat)
+    if (m_sendMutex && xSemaphoreTake(m_sendMutex, pdMS_TO_TICKS(200)) != pdTRUE) {
+        ESP_LOGW(TAG, "Failed to acquire send mutex");
+        return ESP_ERR_TIMEOUT;
+    }
+    
     std::string fullCommand = command + "\n";
     int len = send(m_socket, fullCommand.c_str(), fullCommand.length(), 0);
+    
+    if (m_sendMutex) {
+        xSemaphoreGive(m_sendMutex);
+    }
     
     if (len < 0) {
         ESP_LOGE(TAG, "Failed to send command: %d", errno);
         return ESP_FAIL;
     }
     
-    // Log all sent commands at INFO level for testing
     ESP_LOGD(TAG, "TX: %s", command.c_str());
     return ESP_OK;
 }
