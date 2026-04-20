@@ -27,7 +27,7 @@
 | F-15 | [Dead test handlers in MainScreen](#f-15-dead-test-handlers-in-mainscreen) | LOW | Small | **Done** |
 | F-16 | [Unused Roster model class](#f-16-unused-roster-model-class) | LOW | Small | **Done** |
 | F-17 | [Duplicate speed/direction in Throttle and Locomotive](#f-17-duplicate-speeddirection-in-throttle-and-locomotive) | LOW | Small | **Done** |
-| F-18 | [WiFi password in plaintext NVS](#f-18-wifi-password-in-plaintext-nvs) | LOW | Small | Not Started |
+| F-18 | [WiFi password in plaintext NVS](#f-18-wifi-password-in-plaintext-nvs) | LOW | Small | **Done** |
 
 ### Effort Key
 
@@ -108,7 +108,7 @@ Low-risk code quality improvements.
 
 - [x] `sendCommand()` acquires `m_sendMutex` before calling `send()` and releases it after.
 - [x] Timeout returns `ESP_ERR_TIMEOUT` rather than blocking indefinitely.
-- [x] Existing unit tests pass (`ProtocolParsingTests`) — 29 tests, 0 failures.
+- [x] Existing unit tests pass (`ProtocolParsingTests`) — current suite passes (25 tests, 0 failures).
 - [ ] Manual test: rapid knob rotation while polling timer is active produces no garbled protocol output (verify via serial log).
 
 ---
@@ -139,7 +139,7 @@ Low-risk code quality improvements.
 - [x] `disconnect()` never calls `eTaskGetState()` or `vTaskDelete(handle)` on the receive task.
 - [x] Receive task signals exit before self-deleting.
 - [x] `disconnect()` waits for the signal (with bounded timeout) before closing the socket.
-- [x] Existing unit tests pass — 29 tests, 0 failures.
+- [x] Existing unit tests pass — current suite passes (25 tests, 0 failures).
 - [ ] Manual test: repeated connect/disconnect cycles (10+) with no crash or heap corruption (check free heap before/after via serial log).
 
 ---
@@ -239,7 +239,7 @@ WiFi scan (`performScan()`, ~3s blocking) and WiThrottle connect (synchronous TC
 - [x] `getThrottle()`, `getKnob()`, `getRoster()` are not part of the public API (or removed entirely).
 - [x] All external access uses snapshot methods.
 - [x] Project compiles cleanly with no new warnings.
-- [x] Existing unit tests pass (may need updating if they use these accessors) — 29 tests, 0 failures.
+- [x] Existing unit tests pass (may need updating if they use these accessors) — current suite passes (25 tests, 0 failures).
 
 ---
 
@@ -343,7 +343,7 @@ Note: If F-09 is implemented first (dedicated task), this fix is naturally incor
 
 - [x] Throttle state reads in `pollThrottleStates()` are protected by `m_stateMutex`.
 - [x] The mutex is released before any network I/O.
-- [x] Existing unit tests pass — 29 tests, 0 failures.
+- [x] Existing unit tests pass — current suite passes (25 tests, 0 failures).
 
 ---
 
@@ -487,7 +487,7 @@ Recommendation: **Option A** — the vector approach works fine and the Roster c
 #### Acceptance Criteria
 
 - [x] No dead roster code remains (or the class is fully integrated).
-- [x] All tests pass — 26 tests, 0 failures.
+- [x] All tests pass — current suite passes (25 tests, 0 failures).
 
 ---
 
@@ -534,8 +534,8 @@ This is an accepted risk for a home model railway controller on a private networ
 
 #### Acceptance Criteria
 
-- [ ] Risk is documented in a code comment.
-- [ ] No functional change required.
+- [x] Risk is documented in a code comment.
+- [x] No functional change required.
 
 ---
 
@@ -543,7 +543,7 @@ This is an accepted risk for a home model railway controller on a private networ
 
 ### Automated Testing (Existing Infrastructure)
 
-The project has 28 Unity-based on-device unit tests covering model classes, state machines, and protocol parsing. These run via `pytest-embedded` over serial and are triggered by:
+The project currently has 25 Unity-based on-device unit tests covering model classes, state machines, and protocol parsing. These run via `pytest-embedded` over serial and are triggered by:
 
 ```powershell
 .\tools\ensure-idf.ps1; idf.py -B build-tests -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test.defaults" -D SDKCONFIG="build-tests/sdkconfig" flash_test
@@ -732,3 +732,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-13 completed — cached speed-step setting now reloads immediately from settings |
 | 2026-04-20 | F-16 completed — removed unused Roster model and isolated roster tests |
 | 2026-04-20 | F-17 completed — Locomotive now stores identity/function metadata only |
+| 2026-04-20 | F-18 completed — documented accepted plaintext NVS credential storage risk |

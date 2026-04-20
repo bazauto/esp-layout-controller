@@ -281,6 +281,10 @@ esp_err_t WiFiManager::loadCredentials(std::string& ssid, std::string& password)
         return ret;
     }
 
+    // WiFi credentials are intentionally stored in plaintext NVS for this home-layout
+    // controller deployment. NVS encryption is not enabled today; if the threat model
+    // changes, enable NVS encryption in sdkconfig and migrate the stored credentials.
+
     // Read SSID
     size_t ssid_len = 0;
     ret = nvs_get_str(handle, NVS_SSID_KEY, nullptr, &ssid_len);
