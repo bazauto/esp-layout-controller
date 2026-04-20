@@ -13,7 +13,8 @@ ThrottleController::ThrottleController(WiThrottleClient* wiThrottleClient)
     , m_stateMutex(nullptr)
     , m_uiUpdateCallback(nullptr)
     , m_uiUpdateUserData(nullptr)
-    , m_pollingTimer(nullptr)
+    , m_pollingTask(nullptr)
+    , m_pollingRunning(false)
 {
     // Create throttles
     for (int i = 0; i < NUM_THROTTLES; i++) {
@@ -642,54 +643,45 @@ void ThrottleController::pollThrottleStates()
     }
 }
 
-void ThrottleController::pollingTimerCallback(void* arg)
+void ThrottleController::pollingTaskFunc(void* arg)
 {
     ThrottleController* controller = static_cast<ThrottleController*>(arg);
-    if (controller) {
+    while (controller->m_pollingRunning) {
         controller->pollThrottleStates();
+        // Sleep 10 seconds between polls; check flag every 500 ms for fast shutdown
+        for (int i = 0; i < 20 && controller->m_pollingRunning; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
     }
+    vTaskDelete(nullptr);
 }
 
 void ThrottleController::startPollingTimer()
 {
-    if (m_pollingTimer != nullptr) {
-        ESP_LOGW(TAG, "Polling timer already started");
+    if (m_pollingTask != nullptr) {
+        ESP_LOGW(TAG, "Polling task already started");
         return;
     }
     
-    // Create timer that fires every 10 seconds
-    esp_timer_create_args_t timerArgs = {
-        .callback = pollingTimerCallback,
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "throttle_poll",
-        .skip_unhandled_events = false
-    };
-    
-    esp_err_t err = esp_timer_create(&timerArgs, &m_pollingTimer);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create polling timer: %s", esp_err_to_name(err));
+    m_pollingRunning = true;
+    BaseType_t ret = xTaskCreate(pollingTaskFunc, "throttle_poll", 4096, this, 3, &m_pollingTask);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create polling task");
+        m_pollingRunning = false;
         return;
     }
     
-    // Start periodic timer (10 seconds = 10,000,000 microseconds)
-    err = esp_timer_start_periodic(m_pollingTimer, 10 * 1000000);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start polling timer: %s", esp_err_to_name(err));
-        esp_timer_delete(m_pollingTimer);
-        m_pollingTimer = nullptr;
-        return;
-    }
-    
-    ESP_LOGI(TAG, "Started throttle state polling (10 second interval)");
+    ESP_LOGI(TAG, "Started throttle state polling task (10 second interval)");
 }
 
 void ThrottleController::stopPollingTimer()
 {
-    if (m_pollingTimer != nullptr) {
-        esp_timer_stop(m_pollingTimer);
-        esp_timer_delete(m_pollingTimer);
-        m_pollingTimer = nullptr;
+    if (m_pollingTask != nullptr) {
+        m_pollingRunning = false;
+        // The task will exit on its own within ~500 ms
+        // Wait briefly for it to finish
+        vTaskDelay(pdMS_TO_TICKS(600));
+        m_pollingTask = nullptr;
         ESP_LOGI(TAG, "Stopped throttle state polling");
     }
 }

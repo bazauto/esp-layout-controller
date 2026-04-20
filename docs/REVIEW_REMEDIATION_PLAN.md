@@ -17,7 +17,7 @@
 | F-05 | [Blocking I/O in LVGL event handlers](#f-05-blocking-io-in-lvgl-event-handlers) | HIGH | Large | Not Started |
 | F-06 | [Raw pointer accessors bypass state mutex](#f-06-raw-pointer-accessors-bypass-state-mutex) | HIGH | Small | **Done** |
 | F-07 | [`m_powerStates` unprotected across threads](#f-07-m_powerstates-unprotected-across-threads) | HIGH | Small | **Done** |
-| F-08 | [Screen/callback ownership and lifecycle](#f-08-screencallback-ownership-and-lifecycle) | HIGH | Large | Not Started |
+| F-08 | [Screen/callback ownership and lifecycle](#f-08-screencallback-ownership-and-lifecycle) | HIGH | Large | **Done** |
 | F-09 | [Polling timer blocks `esp_timer` task](#f-09-polling-timer-blocks-esp_timer-task) | HIGH | Medium | Not Started |
 | F-10 | [`pollThrottleStates()` bypasses `m_stateMutex`](#f-10-pollthrottlestates-bypasses-m_statemutex) | MEDIUM | Small | **Done** |
 | F-11 | [`sendJsonCommand()` masks errors](#f-11-sendjsoncommand-masks-errors) | MEDIUM | Small | Not Started |
@@ -288,8 +288,8 @@ This depends on F-03 (screens owned by `AppController`).
 
 #### Acceptance Criteria
 
-- [ ] Screen destructors deregister all callbacks from shared services.
-- [ ] No callback fires targeting a destroyed screen object.
+- [x] Screen destructors deregister all callbacks from shared services.
+- [x] No callback fires targeting a destroyed screen object.
 - [ ] Navigating Main → WiFi Config → Main → JMRI Config → Main (repeated) causes no crashes and no heap growth.
 
 ---
@@ -724,3 +724,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-10 completed — snapshot-then-query pattern in `pollThrottleStates()` |
 | 2026-04-20 | F-14 completed — `lvgl_port_lock(200)` replaces `-1` in PowerStatusBar |
 | 2026-04-20 | F-03 completed — config screens stored as `unique_ptr` in AppController |
+| 2026-04-20 | F-08 completed — destructors deregister callbacks from shared services |

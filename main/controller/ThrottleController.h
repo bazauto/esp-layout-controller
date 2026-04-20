@@ -3,9 +3,9 @@
 #include "Knob.h"
 #include "Throttle.h"
 #include "WiThrottleClient.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include <memory>
 #include <vector>
 
@@ -167,7 +167,7 @@ private:
     
     // Polling for state synchronization
     void pollThrottleStates();
-    static void pollingTimerCallback(void* arg);
+    static void pollingTaskFunc(void* arg);
     void startPollingTimer();
     void stopPollingTimer();
     
@@ -180,5 +180,6 @@ private:
     void (*m_uiUpdateCallback)(void*);
     void* m_uiUpdateUserData;
     
-    esp_timer_handle_t m_pollingTimer;
+    TaskHandle_t m_pollingTask;
+    bool m_pollingRunning;
 };
