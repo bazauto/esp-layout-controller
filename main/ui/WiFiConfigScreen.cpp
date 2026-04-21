@@ -1,6 +1,8 @@
 #include "WiFiConfigScreen.h"
 #include "wrappers/wifi_config_wrapper.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl_port.h"
 #include <algorithm>
 
@@ -33,6 +35,7 @@ WiFiConfigScreen::WiFiConfigScreen(WiFiManager& wifiManager)
     , m_keyboard(nullptr)
     , m_keyboardLabel(nullptr)
     , m_wifiManager(wifiManager)
+    , m_scanInProgress(false)
 {
 }
 
@@ -83,6 +86,12 @@ lv_obj_t* WiFiConfigScreen::create()
     
     // Initial status update
     updateStatus();
+    if (m_scanInProgress.load()) {
+        lv_dropdown_set_options(m_networkList, "Scanning...");
+        lv_obj_add_state(m_scanButton, LV_STATE_DISABLED);
+    } else if (!m_scanResults.empty()) {
+        updateNetworkList();
+    }
     
     // Load screen
     lv_scr_load(m_screen);
@@ -220,6 +229,10 @@ void WiFiConfigScreen::createButtonSection(lv_obj_t* parent)
 
 void WiFiConfigScreen::updateStatus()
 {
+    if (!m_statusLabel || !m_ssidLabel || !m_ipLabel || !m_connectButton || !m_disconnectButton || !m_forgetButton) {
+        return;
+    }
+
     WiFiManager::State state = m_wifiManager.getState();
     std::string ssid = m_wifiManager.getStoredSsid();
     
@@ -270,8 +283,8 @@ void WiFiConfigScreen::updateStatus()
 
 void WiFiConfigScreen::close()
 {
-    // Don't manually delete screen - LVGL will handle it
-    m_screen = nullptr;
+    m_wifiManager.setStateCallback(nullptr);
+    clearUiPointers();
 }
 
 void WiFiConfigScreen::onScanButtonClicked(lv_event_t* e)
@@ -300,11 +313,20 @@ void WiFiConfigScreen::onForgetButtonClicked(lv_event_t* e)
 
 void WiFiConfigScreen::onBackButtonClicked(lv_event_t* e)
 {
-    (void)e; // Screen pointer not needed - use wrapper function
+    WiFiConfigScreen* screen = static_cast<WiFiConfigScreen*>(lv_event_get_user_data(e));
     ESP_LOGI(TAG, "Back button clicked - returning to main screen");
+
+    screen->hideKeyboard();
+
+    lv_obj_t* oldScreen = screen->m_screen;
+    screen->close();
     
     // Use wrapper function to safely navigate back
     close_wifi_config_screen();
+
+    if (oldScreen) {
+        lv_obj_del_async(oldScreen);
+    }
 }
 
 void WiFiConfigScreen::onNetworkSelected(lv_event_t* e)
@@ -340,23 +362,78 @@ void WiFiConfigScreen::onWiFiStateChanged(void* userData, WiFiManager::State sta
 
 void WiFiConfigScreen::performScan()
 {
-    ESP_LOGI(TAG, "Starting WiFi scan...");
-    
-    esp_err_t err = m_wifiManager.startScan();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start scan: %s", esp_err_to_name(err));
+    if (m_scanInProgress.exchange(true)) {
+        ESP_LOGW(TAG, "WiFi scan already in progress");
         return;
     }
-    
-    // Wait a bit for scan to complete (in real use, you'd use a callback/event)
-    vTaskDelay(pdMS_TO_TICKS(3000));
-    
-    m_scanResults = m_wifiManager.getScanResults();
-    updateNetworkList();
+
+    ESP_LOGI(TAG, "Starting WiFi scan...");
+
+    if (m_scanButton) {
+        lv_obj_add_state(m_scanButton, LV_STATE_DISABLED);
+    }
+    if (m_networkList) {
+        lv_dropdown_set_options(m_networkList, "Scanning...");
+    }
+
+    if (xTaskCreate(scanTask, "wifi_scan", 4096, this, 4, nullptr) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start WiFi scan task");
+        m_scanInProgress.store(false);
+        if (m_scanButton) {
+            lv_obj_clear_state(m_scanButton, LV_STATE_DISABLED);
+        }
+    }
+}
+
+void WiFiConfigScreen::scanTask(void* arg)
+{
+    auto* screen = static_cast<WiFiConfigScreen*>(arg);
+    std::vector<std::string> results;
+    bool scanFailed = false;
+
+    esp_err_t err = screen->m_wifiManager.startScan();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start scan: %s", esp_err_to_name(err));
+        scanFailed = true;
+    } else {
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        results = screen->m_wifiManager.getScanResults();
+    }
+
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        if (lvgl_port_lock(200)) {
+            screen->m_scanResults = std::move(results);
+            screen->m_scanInProgress.store(false);
+
+            if (screen->m_scanButton) {
+                lv_obj_clear_state(screen->m_scanButton, LV_STATE_DISABLED);
+            }
+
+            if (screen->m_screen && screen->m_networkList) {
+                if (scanFailed) {
+                    lv_dropdown_set_options(screen->m_networkList, "Scan failed");
+                } else {
+                    screen->updateNetworkList();
+                }
+            }
+
+            lvgl_port_unlock();
+            vTaskDelete(nullptr);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    screen->m_scanInProgress.store(false);
+    vTaskDelete(nullptr);
 }
 
 void WiFiConfigScreen::updateNetworkList()
 {
+    if (!m_networkList) {
+        return;
+    }
+
     if (m_scanResults.empty()) {
         lv_dropdown_set_options(m_networkList, "No networks found");
         ESP_LOGW(TAG, "No networks found in scan");
@@ -415,6 +492,24 @@ void WiFiConfigScreen::forgetWiFi()
     ESP_LOGI(TAG, "Forgetting WiFi network and disconnecting");
     m_wifiManager.forgetNetwork();
     updateStatus();
+}
+
+void WiFiConfigScreen::clearUiPointers()
+{
+    m_screen = nullptr;
+    m_statusLabel = nullptr;
+    m_ssidLabel = nullptr;
+    m_ipLabel = nullptr;
+    m_networkList = nullptr;
+    m_ssidInput = nullptr;
+    m_passwordInput = nullptr;
+    m_scanButton = nullptr;
+    m_connectButton = nullptr;
+    m_disconnectButton = nullptr;
+    m_forgetButton = nullptr;
+    m_backButton = nullptr;
+    m_keyboard = nullptr;
+    m_keyboardLabel = nullptr;
 }
 
 std::string WiFiConfigScreen::getPasswordText() const

@@ -14,7 +14,7 @@
 | F-02 | [Receive task lifecycle race in `disconnect()`](#f-02-receive-task-lifecycle-race-in-disconnect) | CRITICAL | Medium | **Done** |
 | F-03 | [Config screen memory leaks](#f-03-config-screen-memory-leaks) | HIGH | Medium | **Done** |
 | F-04 | [WiFi state callbacks bypass LVGL lock](#f-04-wifi-state-callbacks-bypass-lvgl-lock) | HIGH | Small | **Done** |
-| F-05 | [Blocking I/O in LVGL event handlers](#f-05-blocking-io-in-lvgl-event-handlers) | HIGH | Large | Not Started |
+| F-05 | [Blocking I/O in LVGL event handlers](#f-05-blocking-io-in-lvgl-event-handlers) | HIGH | Large | **Done** |
 | F-06 | [Raw pointer accessors bypass state mutex](#f-06-raw-pointer-accessors-bypass-state-mutex) | HIGH | Small | **Done** |
 | F-07 | [`m_powerStates` unprotected across threads](#f-07-m_powerstates-unprotected-across-threads) | HIGH | Small | **Done** |
 | F-08 | [Screen/callback ownership and lifecycle](#f-08-screencallback-ownership-and-lifecycle) | HIGH | Large | **Done** |
@@ -210,10 +210,10 @@ WiFi scan (`performScan()`, ~3s blocking) and WiThrottle connect (synchronous TC
 
 #### Acceptance Criteria
 
-- [ ] WiFi scan button shows progress indicator; UI remains responsive during scan.
-- [ ] WiThrottle connect button shows "Connecting..." status; UI remains responsive during connect.
+- [x] WiFi scan button shows progress indicator; UI remains responsive during scan.
+- [x] WiThrottle connect button shows "Connecting..." status; UI remains responsive during connect.
 - [ ] Touchscreen input is processed during both operations (test by tapping other UI elements).
-- [ ] Error states (scan failure, connect timeout) are displayed correctly.
+- [x] Error states (scan failure, connect timeout) are displayed correctly.
 
 ---
 
@@ -733,3 +733,4 @@ After each finding is resolved, update:
 | 2026-04-20 | F-16 completed — removed unused Roster model and isolated roster tests |
 | 2026-04-20 | F-17 completed — Locomotive now stores identity/function metadata only |
 | 2026-04-20 | F-18 completed — documented accepted plaintext NVS credential storage risk |
+| 2026-04-20 | F-05 completed — WiFi scan and JMRI connect moved off LVGL event path |

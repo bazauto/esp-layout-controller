@@ -110,8 +110,9 @@ void AppController::showWiFiConfigScreen()
         return;
     }
 
-    m_wifiConfigScreen.reset();
-    m_wifiConfigScreen = std::make_unique<WiFiConfigScreen>(*manager);
+    if (!m_wifiConfigScreen) {
+        m_wifiConfigScreen = std::make_unique<WiFiConfigScreen>(*manager);
+    }
     m_wifiConfigScreen->create();
 }
 
@@ -119,12 +120,13 @@ void AppController::showJmriConfigScreen()
 {
     initialise();
 
-    m_jmriConfigScreen.reset();
-    m_jmriConfigScreen = std::make_unique<JmriConfigScreen>(*m_jmriClient,
-                                       *m_wiThrottleClient,
-                                       m_wifiController.get(),
-                                       m_rotaryEncoderHal.get(),
-                                       m_throttleController.get());
+    if (!m_jmriConfigScreen) {
+        m_jmriConfigScreen = std::make_unique<JmriConfigScreen>(*m_jmriClient,
+                                           *m_wiThrottleClient,
+                                           m_wifiController.get(),
+                                           m_rotaryEncoderHal.get(),
+                                           m_throttleController.get());
+    }
     m_jmriConfigScreen->create();
 }
 

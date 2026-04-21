@@ -2,6 +2,7 @@
 
 #include "lvgl.h"
 #include "../communication/WiFiManager.h"
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -63,6 +64,7 @@ private:
     
     // Cached scan results
     std::vector<std::string> m_scanResults;
+    std::atomic<bool> m_scanInProgress;
     
     // Event handlers
     static void onScanButtonClicked(lv_event_t* e);
@@ -74,6 +76,7 @@ private:
     static void onWiFiStateChanged(void* userData, WiFiManager::State state);
     static void onTextAreaFocused(lv_event_t* e);
     static void onTextAreaDefocused(lv_event_t* e);
+    static void scanTask(void* arg);
     
     // UI builders
     void createStatusSection(lv_obj_t* parent);
@@ -92,6 +95,7 @@ private:
     void connectToWiFi();
     void disconnectWiFi();
     void forgetWiFi();
+    void clearUiPointers();
     std::string getPasswordText() const;
     std::string getSsidText() const;
 };

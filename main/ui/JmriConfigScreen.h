@@ -3,6 +3,7 @@
 #include "lvgl.h"
 #include "../communication/JmriJsonClient.h"
 #include "../communication/WiThrottleClient.h"
+#include <atomic>
 #include <string>
 
 /**
@@ -61,6 +62,7 @@ private:
     void disconnectFromJmri();
     void saveSettings();
     void loadSettings();
+    void clearUiPointers();
     
     std::string getServerIpText() const;
     std::string getWiThrottlePortText() const;
@@ -72,6 +74,7 @@ private:
     static void onBackButtonClicked(lv_event_t* e);
     static void onTextAreaFocused(lv_event_t* e);
     static void onTextAreaDefocused(lv_event_t* e);
+    static void connectTask(void* arg);
     
     // LVGL objects
     lv_obj_t* m_screen;
@@ -91,6 +94,7 @@ private:
     lv_obj_t* m_backButton;
     lv_obj_t* m_keyboard;
     lv_obj_t* m_keyboardLabel;
+    std::atomic<bool> m_connectInProgress;
     
     // Client references
     JmriJsonClient& m_jsonClient;

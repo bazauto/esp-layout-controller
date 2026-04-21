@@ -6,10 +6,24 @@
 #include "../hardware/RotaryEncoderHal.h"
 #include "esp_app_desc.h"
 #include "esp_chip_info.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "lvgl_port.h"
 #include <cstring>
+#include <memory>
+
+namespace {
+struct JmriConnectTaskArgs {
+    JmriConfigScreen* screen;
+    JmriJsonClient* jsonClient;
+    WiThrottleClient* wiThrottleClient;
+    std::string serverIp;
+    std::string powerManager;
+    uint16_t wiThrottlePort;
+};
+}
 
 extern "C" {
     bool lvgl_port_lock(int timeout_ms);
@@ -47,6 +61,7 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
     , m_backButton(nullptr)
     , m_keyboard(nullptr)
     , m_keyboardLabel(nullptr)
+    , m_connectInProgress(false)
     , m_jsonClient(jsonClient)
     , m_wiThrottleClient(wiThrottleClient)
     , m_wifiController(wifiController)
@@ -351,24 +366,29 @@ void JmriConfigScreen::hideKeyboard()
 
 void JmriConfigScreen::updateStatus()
 {
+    if (!m_connectButton || !m_disconnectButton || !m_statusSoftwareValue || !m_statusHardwareValue ||
+        !m_statusWifiValue || !m_statusWiThrottleValue || !m_statusJsonValue ||
+        !m_statusEncoder1Value || !m_statusEncoder2Value) {
+        return;
+    }
+
     auto jsonState = m_jsonClient.getState();
-    switch (jsonState) {
-        case JmriJsonClient::ConnectionState::CONNECTED:
-            lv_obj_clear_state(m_disconnectButton, LV_STATE_DISABLED);
-            lv_obj_add_state(m_connectButton, LV_STATE_DISABLED);
-            break;
-        case JmriJsonClient::ConnectionState::CONNECTING:
-            lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
-            lv_obj_add_state(m_connectButton, LV_STATE_DISABLED);
-            break;
-        case JmriJsonClient::ConnectionState::FAILED:
-            lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
-            lv_obj_clear_state(m_connectButton, LV_STATE_DISABLED);
-            break;
-        default:
-            lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
-            lv_obj_clear_state(m_connectButton, LV_STATE_DISABLED);
-            break;
+    auto wiThrottleState = m_wiThrottleClient.getState();
+    bool isConnecting = m_connectInProgress.load() ||
+                        wiThrottleState == WiThrottleClient::ConnectionState::CONNECTING ||
+                        jsonState == JmriJsonClient::ConnectionState::CONNECTING;
+    bool isConnected = wiThrottleState == WiThrottleClient::ConnectionState::CONNECTED ||
+                       jsonState == JmriJsonClient::ConnectionState::CONNECTED;
+
+    if (isConnecting) {
+        lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
+        lv_obj_add_state(m_connectButton, LV_STATE_DISABLED);
+    } else if (isConnected) {
+        lv_obj_clear_state(m_disconnectButton, LV_STATE_DISABLED);
+        lv_obj_add_state(m_connectButton, LV_STATE_DISABLED);
+    } else {
+        lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);
+        lv_obj_clear_state(m_connectButton, LV_STATE_DISABLED);
     }
 
     if (m_statusSoftwareValue) {
@@ -389,13 +409,45 @@ void JmriConfigScreen::updateStatus()
                           (m_wifiController && m_wifiController->isConnected()) ? "Connected" : "Disconnected");
     }
 
-    if (m_statusWiThrottleValue) {
-        lv_label_set_text(m_statusWiThrottleValue, m_wiThrottleClient.isConnected() ? "Connected" : "Disconnected");
+    const char* wiThrottleText = "Disconnected";
+    switch (wiThrottleState) {
+        case WiThrottleClient::ConnectionState::CONNECTING:
+            wiThrottleText = "Connecting...";
+            break;
+        case WiThrottleClient::ConnectionState::CONNECTED:
+            wiThrottleText = "Connected";
+            break;
+        case WiThrottleClient::ConnectionState::FAILED:
+            wiThrottleText = "Failed";
+            break;
+        case WiThrottleClient::ConnectionState::DISCONNECTED:
+        default:
+            if (m_connectInProgress.load()) {
+                wiThrottleText = "Connecting...";
+            }
+            break;
     }
+    lv_label_set_text(m_statusWiThrottleValue, wiThrottleText);
 
-    if (m_statusJsonValue) {
-        lv_label_set_text(m_statusJsonValue, m_jsonClient.isConnected() ? "Connected" : "Disconnected");
+    const char* jsonText = "Disconnected";
+    switch (jsonState) {
+        case JmriJsonClient::ConnectionState::CONNECTING:
+            jsonText = "Connecting...";
+            break;
+        case JmriJsonClient::ConnectionState::CONNECTED:
+            jsonText = "Connected";
+            break;
+        case JmriJsonClient::ConnectionState::FAILED:
+            jsonText = "Failed";
+            break;
+        case JmriJsonClient::ConnectionState::DISCONNECTED:
+        default:
+            if (m_connectInProgress.load()) {
+                jsonText = "Waiting...";
+            }
+            break;
     }
+    lv_label_set_text(m_statusJsonValue, jsonText);
 
     if (m_statusEncoder1Value) {
         if (m_encoderHal) {
@@ -422,11 +474,17 @@ void JmriConfigScreen::updateStatus()
 
 void JmriConfigScreen::connectToJmri()
 {
+    if (m_connectInProgress.exchange(true)) {
+        ESP_LOGW(TAG, "JMRI connection already in progress");
+        return;
+    }
+
     std::string serverIp = getServerIpText();
     std::string wtPortStr = getWiThrottlePortText();
     std::string powerMgr = getPowerManagerText();
     
     if (serverIp.empty()) {
+        m_connectInProgress.store(false);
         ESP_LOGW(TAG, "Server IP is empty");
         return;
     }
@@ -438,31 +496,61 @@ void JmriConfigScreen::connectToJmri()
     if (powerMgr.empty()) {
         powerMgr = "DCC++";
     }
-    m_jsonClient.setConfiguredPowerName(powerMgr);
-    
-    ESP_LOGI(TAG, "Connecting to JMRI server: %s (WiThrottle:%d, Power:%s)", 
-             serverIp.c_str(), wtPort, powerMgr.c_str());
-    
-    // Save settings
+
     saveSettings();
-    
-    // Connect WiThrottle first - it will auto-discover JSON port
-    esp_err_t err = m_wiThrottleClient.connect(serverIp, wtPort);
+
+    auto* args = new JmriConnectTaskArgs{
+        this,
+        &m_jsonClient,
+        &m_wiThrottleClient,
+        serverIp,
+        powerMgr,
+        wtPort,
+    };
+
+    if (xTaskCreate(connectTask, "jmri_connect", 6144, args, 4, nullptr) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start JMRI connect task");
+        delete args;
+        m_connectInProgress.store(false);
+    }
+
+    updateStatus();
+}
+
+void JmriConfigScreen::connectTask(void* arg)
+{
+    std::unique_ptr<JmriConnectTaskArgs> args(static_cast<JmriConnectTaskArgs*>(arg));
+
+    args->jsonClient->setConfiguredPowerName(args->powerManager);
+
+    ESP_LOGI(TAG, "Connecting to JMRI server: %s (WiThrottle:%d, Power:%s)",
+             args->serverIp.c_str(), args->wiThrottlePort, args->powerManager.c_str());
+
+    esp_err_t err = args->wiThrottleClient->connect(args->serverIp, args->wiThrottlePort);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect WiThrottle client");
+    } else {
+        args->wiThrottleClient->setWebPortCallback([
+            jsonClient = args->jsonClient,
+            serverIp = args->serverIp
+        ](uint16_t jsonPort) {
+            ESP_LOGI(TAG, "Auto-connecting JSON client to port %d", jsonPort);
+            esp_err_t jsonErr = jsonClient->connect(serverIp, jsonPort);
+            if (jsonErr != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to connect JSON client");
+            }
+        });
     }
-    
-    // Set callback to connect JSON when port is discovered
-    m_wiThrottleClient.setWebPortCallback([this, serverIp](uint16_t jsonPort) {
-        ESP_LOGI(TAG, "Auto-connecting JSON client to port %d", jsonPort);
-        esp_err_t err = m_jsonClient.connect(serverIp, jsonPort);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to connect JSON client");
+
+    args->screen->m_connectInProgress.store(false);
+    if (lvgl_port_lock(200)) {
+        if (args->screen->m_screen) {
+            args->screen->updateStatus();
         }
-    });
-    
-    // Update status
-    updateStatus();
+        lvgl_port_unlock();
+    }
+
+    vTaskDelete(nullptr);
 }
 
 void JmriConfigScreen::disconnectFromJmri()
@@ -593,6 +681,9 @@ void JmriConfigScreen::onBackButtonClicked(lv_event_t* e)
     
     // Hide keyboard if visible
     screen->hideKeyboard();
+
+    screen->m_jsonClient.setConnectionStateCallback(nullptr);
+    screen->m_wiThrottleClient.setConnectionStateCallback(nullptr);
     
     // Load main screen (this will make the JMRI config screen inactive)
     show_main_screen();
@@ -601,8 +692,29 @@ void JmriConfigScreen::onBackButtonClicked(lv_event_t* e)
     // This allows LVGL to finish any pending operations
     if (screen->m_screen) {
         lv_obj_del_async(screen->m_screen);
-        screen->m_screen = nullptr;
+        screen->clearUiPointers();
     }
+}
+
+void JmriConfigScreen::clearUiPointers()
+{
+    m_screen = nullptr;
+    m_serverIpInput = nullptr;
+    m_wiThrottlePortInput = nullptr;
+    m_powerManagerInput = nullptr;
+    m_speedStepsInput = nullptr;
+    m_statusWifiValue = nullptr;
+    m_statusWiThrottleValue = nullptr;
+    m_statusJsonValue = nullptr;
+    m_statusEncoder1Value = nullptr;
+    m_statusEncoder2Value = nullptr;
+    m_statusSoftwareValue = nullptr;
+    m_statusHardwareValue = nullptr;
+    m_connectButton = nullptr;
+    m_disconnectButton = nullptr;
+    m_backButton = nullptr;
+    m_keyboard = nullptr;
+    m_keyboardLabel = nullptr;
 }
 
 void JmriConfigScreen::onTextAreaFocused(lv_event_t* e)
