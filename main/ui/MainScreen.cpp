@@ -36,6 +36,13 @@ MainScreen::MainScreen()
 
 MainScreen::~MainScreen()
 {
+    if (m_throttleController) {
+        m_throttleController->setUIUpdateCallback(nullptr, nullptr);
+    }
+    if (m_wiThrottleClient) {
+        m_wiThrottleClient->setConnectionStateCallback(nullptr);
+    }
+
     // Don't delete LVGL objects here - LVGL manages screen lifecycle
     // When lv_scr_load() is called with a new screen, LVGL will clean up the old one
     // Our ThrottleMeter objects will be destroyed naturally with their parent containers
@@ -50,6 +57,15 @@ lv_obj_t* MainScreen::create(WiThrottleClient* wiThrottleClient, JmriJsonClient*
     // Register UI update callback with the controller
     if (m_throttleController) {
         m_throttleController->setUIUpdateCallback(onUIUpdateNeeded, this);
+    }
+
+    if (m_wiThrottleClient) {
+        m_wiThrottleClient->setConnectionStateCallback([this](WiThrottleClient::ConnectionState) {
+            if (lvgl_port_lock(100)) {
+                updateAllThrottles();
+                lvgl_port_unlock();
+            }
+        });
     }
     
     // Create a new screen or clean the current one
@@ -252,13 +268,20 @@ void MainScreen::updateThrottle(int throttleId)
     int assignedKnob = snapshot.assignedKnob;
     meter->setAssignedKnob(assignedKnob);
 
+    bool wiThrottleConnected = m_wiThrottleClient && m_wiThrottleClient->isConnected();
+
     // Hide function panel when entering roster selection
     if (snapshot.state == Throttle::State::SELECTING && m_functionPanel && m_functionPanel->isVisible()) {
         m_functionPanel->hide();
     }
 
-    // Update knob availability (disable indicator if other knob is active)
-    if (assignedKnob >= 0) {
+    // Disable K1/K2 completely when WiThrottle is disconnected to avoid entering
+    // a roster-selection flow with no usable roster data.
+    if (!wiThrottleConnected) {
+        meter->setKnobAvailable(0, false);
+        meter->setKnobAvailable(1, false);
+    } else if (assignedKnob >= 0) {
+        // Update knob availability (disable indicator if other knob is active)
         // One knob is assigned, disable the other
         meter->setKnobAvailable(0, assignedKnob == 0);
         meter->setKnobAvailable(1, assignedKnob == 1);
@@ -291,6 +314,10 @@ void MainScreen::onKnobIndicatorTouched(lv_event_t* e)
 {
     MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
     if (!screen->m_throttleController) return;
+    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
+        ESP_LOGI(TAG, "Ignoring knob touch while WiThrottle is disconnected");
+        return;
+    }
     
     // Get the knob indicator button that was touched
     lv_obj_t* indicator = lv_event_get_target(e);

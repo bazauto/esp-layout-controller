@@ -29,10 +29,10 @@ stateDiagram-v2
 
 | State | Knob | Loco | User can... |
 |-------|------|------|-------------|
-| `UNALLOCATED` | None | None | Touch knob indicator to start selection |
+| `UNALLOCATED` | None | None | Touch knob indicator to start selection (only when WiThrottle is connected) |
 | `SELECTING` | Assigned | None | Rotate to browse roster, press to acquire |
 | `ALLOCATED_WITH_KNOB` | Assigned | Assigned | Rotate to control speed, press for e-stop |
-| `ALLOCATED_NO_KNOB` | None | Assigned | Touch knob indicator to re-assign, press release button |
+| `ALLOCATED_NO_KNOB` | None | Assigned | Touch knob indicator to re-assign, press release button (knob buttons disabled if WiThrottle is disconnected) |
 
 ### Transition Details
 

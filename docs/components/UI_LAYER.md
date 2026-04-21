@@ -112,7 +112,7 @@ All UI code uses LVGL (Light and Versatile Graphics Library). The UI layer holds
 **Visual elements:**
 - Needle indicator (speed)
 - Colour-coded arc zones
-- L/R knob indicator buttons
+- L/R knob indicator buttons (disabled while WiThrottle is disconnected)
 - Direction indicator (F/R)
 - Locomotive name and address labels
 - "Functions" and "Release" buttons
