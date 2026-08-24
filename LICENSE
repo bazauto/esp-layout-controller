@@ -2,25 +2,6 @@ MIT License
 
 Copyright (c) 2024-2026 Paul Barrett
 
-This licence covers the first-party application code only: main/ (except the
-Espressif-derived files named below), tools/ and the documentation.
-
-It does NOT cover the third-party components redistributed in this repository,
-each of which is governed by its own licence and carries its own notice:
-
-  components/lvgl__lvgl/                     MIT            LICENCE.txt
-  components/espressif__esp_lcd_touch/       Apache-2.0     license.txt
-  components/espressif__esp_lcd_touch_gt911/ Apache-2.0     license.txt
-
-Nor the following files in main/, which are derived from Espressif originals and
-retain their upstream SPDX headers, carrying a modification notice where they
-have been changed:
-
-  main/lvgl_port.c, main/lvgl_port.h                 Apache-2.0
-  main/waveshare_rgb_lcd_port.c, .h                  CC0-1.0
-
-See the Licence section of README.md for the full picture.
-
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
