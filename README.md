@@ -2,6 +2,12 @@
 
 A 7" touchscreen interface for model railway control, built on the ESP32-S3. Connects to [JMRI](https://www.jmri.org/) via the [WiThrottle protocol](https://www.jmri.org/help/en/package/jmri/jmrit/withrottle/Protocol.shtml) over WiFi to drive up to 4 locomotives simultaneously, with 2 physical rotary encoders for speed control and roster browsing.
 
+Part of a four-repo control stack for the Westgate Hollow model railway:
+[layout-orchestration](https://github.com/bazauto/layout-orchestration) (backend and operator
+UI), [PicoDCC](https://github.com/bazauto/PicoDCC) (DCC command station),
+[layout-feedback](https://github.com/bazauto/layout-feedback) (MicroPython sensor nodes), and
+this — the handheld throttle.
+
 ## Features
 
 - **4 simultaneous throttles** — control 4 locomotives independently from a single device
