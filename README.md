@@ -87,42 +87,11 @@ All core phases are complete. The device is fully functional with touchscreen UI
 
 ## Licence
 
-The first-party application code is licensed under the [MIT License](LICENSE). That is
-`main/` (except the four Espressif-derived files below), `tools/` and the documentation.
+The first-party application code is licensed under the [MIT License](LICENSE) — `main/`
+(except four Espressif-derived files), `tools/` and the documentation.
 
-### Espressif-derived files in `main/`
-
-These keep their upstream SPDX headers rather than the project licence. Where they have been
-changed, the header carries a modification notice, as Apache-2.0 §4(b) requires:
-
-| File | Licence | Modified |
-|---|---|---|
-| `lvgl_port.c` | Apache-2.0 | Yes — installs the LVGL dark theme at init |
-| `lvgl_port.h` | Apache-2.0 | No |
-| `waveshare_rgb_lcd_port.c` | CC0-1.0 | Yes — `TAG` defined and renamed here |
-| `waveshare_rgb_lcd_port.h` | CC0-1.0 | Yes — `TAG` moved out to the `.c` |
-
-`main/main.c` is MIT and first-party, but is based on the Espressif RGB Avoid Tearing example
-(CC0-1.0), which its header records.
-
-### Third-party components
-
-Vendored into this repository under `components/`, each with its own licence file. **Nothing
-under `components/` is first-party code**, and the MIT grant above does not extend to it.
-
-| Component | Licence | Notice |
-|---|---|---|
-| [LVGL](https://lvgl.io/) v8.4.0 | MIT | `components/lvgl__lvgl/LICENCE.txt` |
-| ESP LCD Touch v1.1.2 | Apache-2.0 | `components/espressif__esp_lcd_touch/license.txt` |
-| ESP LCD Touch GT911 v1.1.1 | Apache-2.0 | `components/espressif__esp_lcd_touch_gt911/license.txt` |
-
-Resolved by the IDF component manager at build time, not redistributed here:
-
-| Component | Licence |
-|---|---|
-| ESP WebSocket Client v1.6.1 | Apache-2.0 |
-| ESP-IDF v5.5.2 | Apache-2.0 |
-
-**If a firmware binary is ever published**, it links all of the above, and both MIT and
-Apache-2.0 require their notices accompany the binary — ship a `THIRD_PARTY_NOTICES` file with
-the release rather than the `.bin` alone.
+This repository also redistributes LVGL and two Espressif components under `components/`,
+which are **not** covered by that grant and carry their own licences. Full detail — what the
+MIT grant covers, each component's licence and notice location, the Apache-2.0 modification
+notices on the Espressif-derived files, and what a published binary would need — is in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
