@@ -1,0 +1,19 @@
+version: 2
+
+updates:
+  # GitHub Actions used by .github/workflows/ci.yml.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+# No ESP-IDF component entry: Dependabot has no idf-component-manager ecosystem.
+# Vendored components under components/ and the versions in dependencies.lock are
+# bumped by hand, which is right for a firmware target that has to be verified on
+# the board anyway.

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: firmware build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ESP-IDF version and target both come from dependencies.lock, which the
+      # component manager writes. Keep them in step with it — a mismatch here
+      # builds something the bench never runs.
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.2
+          target: esp32s3
+          path: '.'
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp-layout-controller-firmware
+          path: |
+            build/*.bin
+            build/*.elf
+            build/flasher_args.json
+          if-no-files-found: error
+          retention-days: 14
