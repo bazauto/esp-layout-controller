@@ -1,3 +1,14 @@
+/*
+ * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: CC0-1.0
+ *
+ * NOTICE: This file has been modified from the Espressif original.
+ * Changes by Paul Barrett, 2026: the `TAG` definition moved to the .c file so
+ * the header no longer emits an unused-variable warning in every translation
+ * unit that includes it.
+ */
+
 #ifndef _RGB_LCD_H_
 #define _RGB_LCD_H_
 

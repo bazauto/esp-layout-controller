@@ -2,6 +2,10 @@
  * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: CC0-1.0
+ *
+ * NOTICE: This file has been modified from the Espressif original.
+ * Changes by Paul Barrett, 2026: `TAG` is defined here rather than in the
+ * header, and renamed from "example".
  */
 
 #include "waveshare_rgb_lcd_port.h"

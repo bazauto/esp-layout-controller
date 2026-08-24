@@ -2,6 +2,10 @@
  * SPDX-FileCopyrightText: 2023-2024 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * NOTICE: This file has been modified from the Espressif original.
+ * Changes by Paul Barrett, 2026: lvgl_port_init() now installs the LVGL default
+ * theme in dark mode before the display is created.
  */
 
 #include "freertos/FreeRTOS.h"
