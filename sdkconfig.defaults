@@ -6,6 +6,10 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# The app is ~1.28 MB and does not fit the default 1 MB factory partition. Without
+# this, a clean checkout compiles and links, then fails the partition size check.
+# It only ever worked because the local sdkconfig — which is gitignored — had it.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_RODATA=y
@@ -21,7 +25,10 @@ CONFIG_LV_MEM_CUSTOM=y
 CONFIG_LV_MEMCPY_MEMSET_STD=y
 CONFIG_LV_USE_LOG=y
 CONFIG_LV_LOG_PRINTF=y
-CONFIG_LV_USE_PERF_MONITOR=y
+# Off, matching the working local config. This file said =y, so a clean checkout
+# built firmware with the FPS/CPU overlay drawn over the UI. Pinned rather than
+# deleted so an upstream default change cannot switch it back on.
+CONFIG_LV_USE_PERF_MONITOR=n
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
