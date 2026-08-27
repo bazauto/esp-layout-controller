@@ -147,7 +147,11 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init()
     waveshare_esp32_s3_touch_reset(); // Reset the touch panel
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL; // Declare a handle for touch panel I/O
-    const esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG(); // Configure I2C for GT911 touch controller
+    esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG(); // Configure I2C for GT911 touch controller
+    // esp_lcd_touch_gt911 1.2.x sets scl_speed_hz in that macro for the newer i2c_master bus
+    // API. This port still drives the legacy driver/i2c.h bus, and esp_lcd_new_panel_io_i2c_v1
+    // rejects any non-zero value outright, so clear it back.
+    tp_io_config.scl_speed_hz = 0;
 
     ESP_LOGI(TAG, "Initialize I2C panel IO"); // Log I2C panel I/O initialization
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)I2C_MASTER_NUM, &tp_io_config, &tp_io_handle)); // Create new I2C panel I/O
