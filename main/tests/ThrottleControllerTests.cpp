@@ -40,6 +40,7 @@ namespace {
         std::vector<Call> directions;
         std::vector<Call> functions;
         std::vector<Call> refreshes;
+        std::vector<Call> pairedCommands;
 
         bool requiresAcquisition() const override { return acquisitionRequired; }
         bool providesRoster() const override { return rosterProvided; }
@@ -67,6 +68,12 @@ namespace {
             directions.push_back({throttleId, 0, forward});
             return ESP_OK;
         }
+        // Overridden so the test can tell a paired change from two separate
+        // ones; the port's default would show up as a direction then a speed.
+        esp_err_t setSpeedAndDirection(int throttleId, int speed, bool forward) override {
+            pairedCommands.push_back({throttleId, speed, forward});
+            return ESP_OK;
+        }
         esp_err_t setFunction(int throttleId, int function, bool state) override {
             functions.push_back({throttleId, function, state});
             return ESP_OK;
@@ -91,6 +98,17 @@ namespace {
         void setFunctionLabelsCallback(FunctionLabelsCallback callback) override {
             functionLabelsCallback = std::move(callback);
         }
+        void setConnectionStateCallback(ConnectionStateCallback callback) override {
+            connectionStateCallback = std::move(callback);
+        }
+
+        /** Drives a link up/down event, as a transport would. */
+        void emitConnectionState(ConnectionState state) {
+            connected = (state == ConnectionState::CONNECTED);
+            if (connectionStateCallback) {
+                connectionStateCallback(state);
+            }
+        }
 
         /** Drives the controller from the transport side, as a real backend
          * would when the server reports a change we did not make. */
@@ -102,6 +120,7 @@ namespace {
 
         ThrottleStateCallback throttleStateCallback;
         FunctionLabelsCallback functionLabelsCallback;
+        ConnectionStateCallback connectionStateCallback;
     };
 
     void uiUpdateCallback(void* userData)
@@ -374,6 +393,74 @@ static void test_controller_hides_roster_when_backend_has_none(void)
     TEST_ASSERT_FALSE(controller.getLocoAtRosterIndex(0, entry));
 }
 
+static void test_controller_reports_backend_connection(void)
+{
+    FakeThrottleBackend backend;
+    backend.connected = false;
+    ThrottleController controller(&backend);
+
+    // The UI gates the knobs on this. It used to be read from WiThrottleClient
+    // directly, so selecting the orchestrator transport left every knob dead
+    // even with the link up.
+    TEST_ASSERT_FALSE(controller.isConnected());
+
+    backend.connected = true;
+    TEST_ASSERT_TRUE(controller.isConnected());
+}
+
+static void test_controller_repaints_on_connection_change(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+    UiCallbackState uiState;
+    controller.setUIUpdateCallback(uiUpdateCallback, &uiState);
+
+    const int before = uiState.calls;
+    backend.emitConnectionState(ThrottleBackend::ConnectionState::CONNECTED);
+
+    // Without this the screen keeps whatever it drew at startup, so a link that
+    // came up after boot never enabled the knobs.
+    TEST_ASSERT_GREATER_THAN_INT(before, uiState.calls);
+}
+
+static void test_controller_function_reaches_backend(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+
+    setupThrottleWithLoco(controller, 1, 0, "LocoJ", 100);
+
+    TEST_ASSERT_EQUAL(ESP_OK, controller.setFunction(1, 3, true));
+    TEST_ASSERT_EQUAL_INT(1, (int)backend.functions.size());
+    TEST_ASSERT_EQUAL_INT(1, backend.functions[0].throttleId);
+    TEST_ASSERT_EQUAL_INT(3, backend.functions[0].intArg);
+    TEST_ASSERT_TRUE(backend.functions[0].boolArg);
+
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, controller.setFunction(99, 3, true));
+}
+
+static void test_controller_pairs_speed_and_direction_on_flip(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+
+    setupThrottleWithLoco(controller, 0, 0, "LocoK", 110);
+
+    Throttle* throttle = controller.getThrottle(0);
+    TEST_ASSERT_NOT_NULL(throttle);
+    throttle->setSpeed(4);
+    throttle->setDirection(true);
+
+    // Crossing zero flips direction. Sending speed against the OLD direction
+    // first would command the loco faster the way it was already going.
+    controller.onKnobRotation(0, -3);
+
+    TEST_ASSERT_EQUAL_INT(0, (int)backend.speeds.size());
+    TEST_ASSERT_EQUAL_INT(1, (int)backend.pairedCommands.size());
+    TEST_ASSERT_EQUAL_INT(0, backend.pairedCommands[0].throttleId);
+    TEST_ASSERT_FALSE(backend.pairedCommands[0].boolArg);
+}
+
 extern "C" void register_controller_tests(void)
 {
     RUN_TEST(test_controller_assign_knob_to_unallocated);
@@ -388,4 +475,8 @@ extern "C" void register_controller_tests(void)
     RUN_TEST(test_controller_applies_backend_throttle_update);
     RUN_TEST(test_controller_roster_comes_from_backend);
     RUN_TEST(test_controller_hides_roster_when_backend_has_none);
+    RUN_TEST(test_controller_reports_backend_connection);
+    RUN_TEST(test_controller_repaints_on_connection_change);
+    RUN_TEST(test_controller_function_reaches_backend);
+    RUN_TEST(test_controller_pairs_speed_and_direction_on_flip);
 }

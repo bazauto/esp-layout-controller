@@ -163,6 +163,27 @@ void WiThrottleBackend::setThrottleStateCallback(ThrottleStateCallback callback)
         });
 }
 
+void WiThrottleBackend::setConnectionStateCallback(ConnectionStateCallback callback)
+{
+    m_connectionStateCallback = std::move(callback);
+
+    if (!m_client) {
+        return;
+    }
+
+    if (!m_connectionStateCallback) {
+        m_client->setConnectionStateCallback(nullptr);
+        return;
+    }
+
+    m_client->setConnectionStateCallback(
+        [this](WiThrottleClient::ConnectionState state) {
+            if (m_connectionStateCallback) {
+                m_connectionStateCallback(toPortState(state));
+            }
+        });
+}
+
 void WiThrottleBackend::setFunctionLabelsCallback(FunctionLabelsCallback callback)
 {
     m_functionLabelsCallback = std::move(callback);

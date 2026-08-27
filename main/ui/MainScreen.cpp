@@ -268,7 +268,10 @@ void MainScreen::updateThrottle(int throttleId)
     int assignedKnob = snapshot.assignedKnob;
     meter->setAssignedKnob(assignedKnob);
 
-    bool wiThrottleConnected = m_wiThrottleClient && m_wiThrottleClient->isConnected();
+    // From the active backend, not a concrete client: under the orchestrator
+    // transport the WiThrottle client is never connected, and gating on it left
+    // every knob dead.
+    bool transportConnected = m_throttleController && m_throttleController->isConnected();
 
     // Hide function panel when entering roster selection
     if (snapshot.state == Throttle::State::SELECTING && m_functionPanel && m_functionPanel->isVisible()) {
@@ -277,7 +280,7 @@ void MainScreen::updateThrottle(int throttleId)
 
     // Disable K1/K2 completely when WiThrottle is disconnected to avoid entering
     // a roster-selection flow with no usable roster data.
-    if (!wiThrottleConnected) {
+    if (!transportConnected) {
         meter->setKnobAvailable(0, false);
         meter->setKnobAvailable(1, false);
     } else if (assignedKnob >= 0) {
@@ -314,8 +317,8 @@ void MainScreen::onKnobIndicatorTouched(lv_event_t* e)
 {
     MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
     if (!screen->m_throttleController) return;
-    if (!screen->m_wiThrottleClient || !screen->m_wiThrottleClient->isConnected()) {
-        ESP_LOGI(TAG, "Ignoring knob touch while WiThrottle is disconnected");
+    if (!screen->m_throttleController->isConnected()) {
+        ESP_LOGI(TAG, "Ignoring knob touch while the transport is disconnected");
         return;
     }
     
@@ -400,12 +403,12 @@ void MainScreen::onFunctionPanelCloseClicked(lv_event_t* e)
 void MainScreen::onFunctionButtonClicked(lv_event_t* e)
 {
     MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
-    if (!screen || !screen->m_functionPanel || !screen->m_throttleController || !screen->m_wiThrottleClient) {
+    if (!screen || !screen->m_functionPanel || !screen->m_throttleController) {
         return;
     }
 
-    if (!screen->m_wiThrottleClient->isConnected()) {
-        ESP_LOGW(TAG, "WiThrottle not connected");
+    if (!screen->m_throttleController->isConnected()) {
+        ESP_LOGW(TAG, "Transport not connected");
         return;
     }
 
@@ -419,9 +422,12 @@ void MainScreen::onFunctionButtonClicked(lv_event_t* e)
         return;
     }
 
-    screen->m_wiThrottleClient->setFunction('0' + throttleId, functionNumber, newState);
+    // Through the controller, so the press reaches whichever transport is in
+    // use. Reaching into WiThrottleClient here sent function presses to a
+    // client that was not even connected under the orchestrator transport.
+    screen->m_throttleController->setFunction(throttleId, functionNumber, newState);
 
-    // Wait for WiThrottle updates to drive UI state
+    // Wait for transport updates to drive UI state
 }
 
 void MainScreen::onReleaseButtonClicked(lv_event_t* e)

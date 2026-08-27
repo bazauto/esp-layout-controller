@@ -132,6 +132,23 @@ public:
     bool getFunctionState(int throttleId, int functionNumber, bool& outState) const;
 
     /**
+     * @brief Whether the active transport's link is up.
+     *
+     * The UI gates the knobs on this. It must come from the active backend and
+     * never from a concrete client, or selecting a transport the UI does not
+     * know about leaves every knob dead.
+     */
+    bool isConnected() const;
+
+    /**
+     * @brief Set a function on a throttle's locomotive.
+     *
+     * Goes through the port, so a function press reaches whichever transport is
+     * actually in use.
+     */
+    esp_err_t setFunction(int throttleId, int functionNumber, bool state);
+
+    /**
      * @brief Get current roster size
      */
     size_t getRosterSize() const;

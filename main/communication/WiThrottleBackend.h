@@ -43,6 +43,7 @@ public:
 
     void setThrottleStateCallback(ThrottleStateCallback callback) override;
     void setFunctionLabelsCallback(FunctionLabelsCallback callback) override;
+    void setConnectionStateCallback(ConnectionStateCallback callback) override;
 
 private:
     /** Throttle index to WiThrottle's character id, or 0 when out of range.
@@ -58,4 +59,5 @@ private:
     // setThrottleStateCallback replaces the first rather than stacking.
     ThrottleStateCallback m_throttleStateCallback;
     FunctionLabelsCallback m_functionLabelsCallback;
+    ConnectionStateCallback m_connectionStateCallback;
 };
