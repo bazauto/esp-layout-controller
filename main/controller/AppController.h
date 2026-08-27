@@ -12,6 +12,7 @@ class ThrottleController;
 class MainScreen;
 class WiFiConfigScreen;
 class JmriConfigScreen;
+class SettingsScreen;
 class OrchestratorConfigScreen;
 class WiFiController;
 class JmriConnectionController;
@@ -32,6 +33,7 @@ public:
     void initialise();
     void showMainScreen();
     void showWiFiConfigScreen();
+    void showSettingsScreen();
     void showJmriConfigScreen();
     void showOrchestratorConfigScreen();
     void autoConnectJmri();
@@ -54,6 +56,7 @@ private:
 
     std::unique_ptr<MainScreen> m_mainScreen;
     std::unique_ptr<WiFiConfigScreen> m_wifiConfigScreen;
+    std::unique_ptr<SettingsScreen> m_settingsScreen;
     std::unique_ptr<JmriConfigScreen> m_jmriConfigScreen;
     std::unique_ptr<OrchestratorConfigScreen> m_orchestratorConfigScreen;
     std::unique_ptr<WiThrottleClient> m_wiThrottleClient;

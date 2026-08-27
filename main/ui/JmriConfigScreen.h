@@ -51,7 +51,6 @@ private:
     void createStatusSection(lv_obj_t* parent);
     void createConfigSection(lv_obj_t* parent);
     void createSystemStatusSection(lv_obj_t* parent);
-    void createTransportSection(lv_obj_t* parent);
     void createButtonSection(lv_obj_t* parent);
     void createKeyboard();
 
@@ -74,8 +73,6 @@ private:
     static void onConnectButtonClicked(lv_event_t* e);
     static void onDisconnectButtonClicked(lv_event_t* e);
     static void onBackButtonClicked(lv_event_t* e);
-    static void onTransportChanged(lv_event_t* e);
-    static void onOrchestratorSettingsClicked(lv_event_t* e);
     static void onTextAreaFocused(lv_event_t* e);
     static void onTextAreaDefocused(lv_event_t* e);
     static void connectTask(void* arg);
@@ -85,16 +82,8 @@ private:
     lv_obj_t* m_serverIpInput;
     lv_obj_t* m_wiThrottlePortInput;
     lv_obj_t* m_powerManagerInput;
-    lv_obj_t* m_speedStepsInput;
-    lv_obj_t* m_transportDropdown;
-    lv_obj_t* m_transportNoteLabel;
-    lv_obj_t* m_statusWifiValue;
     lv_obj_t* m_statusWiThrottleValue;
     lv_obj_t* m_statusJsonValue;
-    lv_obj_t* m_statusEncoder1Value;
-    lv_obj_t* m_statusEncoder2Value;
-    lv_obj_t* m_statusSoftwareValue;
-    lv_obj_t* m_statusHardwareValue;
     lv_obj_t* m_connectButton;
     lv_obj_t* m_disconnectButton;
     lv_obj_t* m_backButton;

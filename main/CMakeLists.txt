@@ -37,6 +37,8 @@ set(APP_SRCS
     "ui/components/FunctionPanel.cpp"
     "ui/WiFiConfigScreen.cpp"
     "ui/wrappers/wifi_config_wrapper.cpp"
+    "ui/SettingsScreen.cpp"
+    "ui/wrappers/settings_wrapper.cpp"
     "ui/JmriConfigScreen.cpp"
     "ui/wrappers/jmri_config_wrapper.cpp"
     "ui/OrchestratorConfigScreen.cpp"

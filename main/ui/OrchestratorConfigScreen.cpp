@@ -7,7 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl_port.h"
-#include "wrappers/jmri_config_wrapper.h"
+#include "wrappers/settings_wrapper.h"
 
 static const char* TAG = "OrchConfigScreen";
 
@@ -401,7 +401,7 @@ void OrchestratorConfigScreen::onBackClicked(lv_event_t* e)
     // Stop the poll before the widgets go, or it paints a deleted label.
     self->stopStatusTimer();
 
-    show_jmri_config_screen();
+    show_settings_screen();
 
     if (self->m_screen) {
         lv_obj_del_async(self->m_screen);

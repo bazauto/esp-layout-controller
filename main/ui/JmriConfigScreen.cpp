@@ -1,6 +1,6 @@
 #include "JmriConfigScreen.h"
 #include "wrappers/main_screen_wrapper.h"
-#include "wrappers/orchestrator_config_wrapper.h"
+#include "wrappers/settings_wrapper.h"
 #include "esp_log.h"
 #include "../controller/ThrottleController.h"
 #include "../controller/WiFiController.h"
@@ -38,7 +38,6 @@ static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SERVER_IP = "server_ip";
 static const char* NVS_KEY_WITHROTTLE_PORT = "wt_port";
 static const char* NVS_KEY_POWER_MANAGER = "power_mgr";
-static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 
 JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
                                    WiThrottleClient& wiThrottleClient,
@@ -49,16 +48,8 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
     , m_serverIpInput(nullptr)
     , m_wiThrottlePortInput(nullptr)
     , m_powerManagerInput(nullptr)
-        , m_speedStepsInput(nullptr)
-    , m_transportDropdown(nullptr)
-    , m_transportNoteLabel(nullptr)
-    , m_statusWifiValue(nullptr)
     , m_statusWiThrottleValue(nullptr)
     , m_statusJsonValue(nullptr)
-    , m_statusEncoder1Value(nullptr)
-    , m_statusEncoder2Value(nullptr)
-    , m_statusSoftwareValue(nullptr)
-    , m_statusHardwareValue(nullptr)
     , m_connectButton(nullptr)
     , m_disconnectButton(nullptr)
     , m_backButton(nullptr)
@@ -108,7 +99,6 @@ lv_obj_t* JmriConfigScreen::create()
     
     // Create sections
     createStatusSection(scrollContainer);
-    createTransportSection(scrollContainer);
     createConfigSection(scrollContainer);
     createSystemStatusSection(scrollContainer);
     createButtonSection(buttonContainer);
@@ -151,7 +141,7 @@ void JmriConfigScreen::createStatusSection(lv_obj_t* parent)
 void JmriConfigScreen::createSystemStatusSection(lv_obj_t* parent)
 {
     lv_obj_t* header = lv_label_create(parent);
-    lv_label_set_text(header, "System Status");
+    lv_label_set_text(header, "JMRI Connections");
     lv_obj_set_style_text_font(header, &lv_font_montserrat_20, 0);
 
     lv_obj_t* statusContainer = lv_obj_create(parent);
@@ -163,13 +153,8 @@ void JmriConfigScreen::createSystemStatusSection(lv_obj_t* parent)
     lv_obj_set_style_pad_all(statusContainer, 0, 0);
     lv_obj_set_style_pad_row(statusContainer, 2, 0);
 
-    addStatusRow(statusContainer, "Software", &m_statusSoftwareValue);
-    addStatusRow(statusContainer, "Hardware", &m_statusHardwareValue);
-    addStatusRow(statusContainer, "WiFi", &m_statusWifiValue);
     addStatusRow(statusContainer, "WiThrottle", &m_statusWiThrottleValue);
     addStatusRow(statusContainer, "JMRI JSON", &m_statusJsonValue);
-    addStatusRow(statusContainer, "Encoder 1", &m_statusEncoder1Value);
-    addStatusRow(statusContainer, "Encoder 2", &m_statusEncoder2Value);
 }
 
 void JmriConfigScreen::addStatusRow(lv_obj_t* parent, const char* label, lv_obj_t** valueLabel)
@@ -258,114 +243,8 @@ void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
     lv_obj_add_event_cb(m_powerManagerInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
     lv_obj_add_event_cb(m_powerManagerInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
     
-    // Speed Steps label
-    lv_obj_t* speedStepsLabel = lv_label_create(rightColumn);
-    lv_label_set_text(speedStepsLabel, "Speed Steps per Click:");
-    lv_obj_set_width(speedStepsLabel, LV_PCT(100));
-    
-    // Speed Steps input
-    m_speedStepsInput = lv_textarea_create(rightColumn);
-    lv_textarea_set_one_line(m_speedStepsInput, true);
-    lv_textarea_set_placeholder_text(m_speedStepsInput, "4");
-    lv_textarea_set_text(m_speedStepsInput, "4");
-    lv_obj_set_width(m_speedStepsInput, LV_PCT(100));
-    lv_textarea_set_accepted_chars(m_speedStepsInput, "0123456789");
-    lv_textarea_set_max_length(m_speedStepsInput, 2);
-    lv_obj_add_event_cb(m_speedStepsInput, onTextAreaFocused, LV_EVENT_FOCUSED, this);
-    lv_obj_add_event_cb(m_speedStepsInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
 
     // Notes removed to make space for status summary row
-}
-
-void JmriConfigScreen::createTransportSection(lv_obj_t* parent)
-{
-    lv_obj_t* container = lv_obj_create(parent);
-    lv_obj_remove_style_all(container);
-    lv_obj_set_size(container, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(container, 12, 0);
-    lv_obj_set_style_pad_bottom(container, 12, 0);
-
-    lv_obj_t* label = lv_label_create(container);
-    lv_label_set_text(label, "Throttle transport:");
-
-    // A choice, not two independent enables: exactly one transport drives locos
-    // at a time, and only the selected one's network stack is brought up. That
-    // is what stops the device retrying a server the operator is not using.
-    m_transportDropdown = lv_dropdown_create(container);
-    lv_dropdown_set_options(m_transportDropdown, "WiThrottle (JMRI)\nLayout Orchestrator");
-    lv_obj_set_width(m_transportDropdown, 260);
-    lv_obj_add_event_cb(m_transportDropdown, onTransportChanged, LV_EVENT_VALUE_CHANGED, this);
-
-    lv_obj_t* orchButton = lv_btn_create(container);
-    lv_obj_set_size(orchButton, 220, 40);
-    lv_obj_set_style_bg_color(orchButton, lv_color_hex(0x1d4e89), 0);
-    lv_obj_add_event_cb(orchButton, onOrchestratorSettingsClicked, LV_EVENT_CLICKED, this);
-    lv_obj_t* orchLabel = lv_label_create(orchButton);
-    lv_label_set_text(orchLabel, "Orchestrator Settings");
-    lv_obj_center(orchLabel);
-
-    m_transportNoteLabel = lv_label_create(parent);
-    lv_label_set_text(m_transportNoteLabel, "");
-    lv_obj_set_style_text_color(m_transportNoteLabel, lv_color_hex(0xfab005), 0);
-    lv_obj_set_width(m_transportNoteLabel, LV_PCT(100));
-}
-
-void JmriConfigScreen::onTransportChanged(lv_event_t* e)
-{
-    auto* self = static_cast<JmriConfigScreen*>(lv_event_get_user_data(e));
-    if (!self || !self->m_transportDropdown) {
-        return;
-    }
-
-    const uint16_t selected = lv_dropdown_get_selected(self->m_transportDropdown);
-    const ThrottleTransport chosen = (selected == 1) ? ThrottleTransport::ORCHESTRATOR
-                                                     : ThrottleTransport::WITHROTTLE;
-
-    // Read-modify-write so the orchestrator's own settings survive.
-    TransportSettings settings = TransportSettings::load();
-
-    if (chosen == ThrottleTransport::ORCHESTRATOR && !settings.isOrchestratorConfigured()) {
-        // Refuse rather than save a selection that would boot into a dead
-        // transport with every knob disabled and nothing explaining why.
-        lv_dropdown_set_selected(self->m_transportDropdown, 0);
-        if (self->m_transportNoteLabel) {
-            lv_label_set_text(self->m_transportNoteLabel,
-                              "Set the orchestrator host and operator credential first.");
-        }
-        return;
-    }
-
-    settings.transport = chosen;
-    settings.save();
-
-    if (self->m_transportNoteLabel) {
-        // The backend is chosen once, during initialise(), because swapping it
-        // under a live ThrottleController would strand locos mid-command.
-        lv_label_set_text(self->m_transportNoteLabel,
-                          "Saved. Restart the device for the transport change to take effect.");
-    }
-}
-
-void JmriConfigScreen::onOrchestratorSettingsClicked(lv_event_t* e)
-{
-    auto* self = static_cast<JmriConfigScreen*>(lv_event_get_user_data(e));
-    if (!self) {
-        return;
-    }
-
-    self->hideKeyboard();
-    self->m_jsonClient.setConnectionStateCallback(nullptr);
-    self->m_wiThrottleClient.setConnectionStateCallback(nullptr);
-
-    show_orchestrator_config_screen();
-
-    if (self->m_screen) {
-        lv_obj_del_async(self->m_screen);
-        self->clearUiPointers();
-    }
 }
 
 void JmriConfigScreen::createButtonSection(lv_obj_t* parent)
@@ -461,9 +340,8 @@ void JmriConfigScreen::hideKeyboard()
 
 void JmriConfigScreen::updateStatus()
 {
-    if (!m_connectButton || !m_disconnectButton || !m_statusSoftwareValue || !m_statusHardwareValue ||
-        !m_statusWifiValue || !m_statusWiThrottleValue || !m_statusJsonValue ||
-        !m_statusEncoder1Value || !m_statusEncoder2Value) {
+    if (!m_connectButton || !m_disconnectButton ||
+        !m_statusWiThrottleValue || !m_statusJsonValue) {
         return;
     }
 
@@ -486,23 +364,8 @@ void JmriConfigScreen::updateStatus()
         lv_obj_clear_state(m_connectButton, LV_STATE_DISABLED);
     }
 
-    if (m_statusSoftwareValue) {
-        const esp_app_desc_t* appDesc = esp_app_get_description();
-        lv_label_set_text(m_statusSoftwareValue, appDesc ? appDesc->version : "unknown");
-    }
 
-    if (m_statusHardwareValue) {
-        esp_chip_info_t chipInfo{};
-        esp_chip_info(&chipInfo);
-        char hwLabel[32];
-        snprintf(hwLabel, sizeof(hwLabel), "ESP32-S3 rev %d", chipInfo.revision);
-        lv_label_set_text(m_statusHardwareValue, hwLabel);
-    }
 
-    if (m_statusWifiValue) {
-        lv_label_set_text(m_statusWifiValue,
-                          (m_wifiController && m_wifiController->isConnected()) ? "Connected" : "Disconnected");
-    }
 
     const char* wiThrottleText = "Disconnected";
     switch (wiThrottleState) {
@@ -544,27 +407,7 @@ void JmriConfigScreen::updateStatus()
     }
     lv_label_set_text(m_statusJsonValue, jsonText);
 
-    if (m_statusEncoder1Value) {
-        if (m_encoderHal) {
-            auto status = m_encoderHal->getStatus(0);
-            char text[24];
-            snprintf(text, sizeof(text), "0x%02X %s", status.address, status.present ? "present" : "missing");
-            lv_label_set_text(m_statusEncoder1Value, text);
-        } else {
-            lv_label_set_text(m_statusEncoder1Value, "Unavailable");
-        }
-    }
 
-    if (m_statusEncoder2Value) {
-        if (m_encoderHal) {
-            auto status = m_encoderHal->getStatus(1);
-            char text[24];
-            snprintf(text, sizeof(text), "0x%02X %s", status.address, status.present ? "present" : "missing");
-            lv_label_set_text(m_statusEncoder2Value, text);
-        } else {
-            lv_label_set_text(m_statusEncoder2Value, "Unavailable");
-        }
-    }
 }
 
 void JmriConfigScreen::connectToJmri()
@@ -670,15 +513,10 @@ void JmriConfigScreen::saveSettings()
     std::string serverIp = getServerIpText();
     std::string wtPort = getWiThrottlePortText();
     std::string powerMgr = getPowerManagerText();
-    const char* speedStepsText = lv_textarea_get_text(m_speedStepsInput);
-    int speedSteps = speedStepsText ? atoi(speedStepsText) : 4;
-    if (speedSteps < 1) speedSteps = 1;
-    if (speedSteps > 20) speedSteps = 20;
     
     nvs_set_str(handle, NVS_KEY_SERVER_IP, serverIp.c_str());
     nvs_set_str(handle, NVS_KEY_WITHROTTLE_PORT, wtPort.c_str());
     nvs_set_str(handle, NVS_KEY_POWER_MANAGER, powerMgr.c_str());
-    nvs_set_i32(handle, NVS_KEY_SPEED_STEPS, speedSteps);
     
     nvs_commit(handle);
     nvs_close(handle);
@@ -687,7 +525,7 @@ void JmriConfigScreen::saveSettings()
         m_throttleController->reloadSpeedStepsFromNvs();
     }
     
-    ESP_LOGI(TAG, "JMRI settings saved (Power Manager: %s, Speed Steps: %d)", powerMgr.c_str(), speedSteps);
+    ESP_LOGI(TAG, "JMRI settings saved (Power Manager: %s)", powerMgr.c_str());
 }
 
 void JmriConfigScreen::loadSettings()
@@ -723,25 +561,10 @@ void JmriConfigScreen::loadSettings()
         ESP_LOGI(TAG, "Power Manager configured: %s", buffer);
     }
     
-    // Load Speed Steps
-    int32_t speedSteps = 4; // default
-    if (nvs_get_i32(handle, NVS_KEY_SPEED_STEPS, &speedSteps) == ESP_OK) {
-        char speedStepsStr[8];
-        snprintf(speedStepsStr, sizeof(speedStepsStr), "%d", (int)speedSteps);
-        lv_textarea_set_text(m_speedStepsInput, speedStepsStr);
-        ESP_LOGI(TAG, "Speed Steps configured: %d", (int)speedSteps);
-    }
-    
-    nvs_close(handle);
+    // Speed steps per click lives on the settings screen: it is a property of
+    // the encoder, not of JMRI.
 
-    // The transport choice lives in its own namespace, not the JMRI one, so it
-    // is read separately rather than from the handle above.
-    if (m_transportDropdown) {
-        const TransportSettings transportSettings = TransportSettings::load();
-        lv_dropdown_set_selected(
-            m_transportDropdown,
-            transportSettings.transport == ThrottleTransport::ORCHESTRATOR ? 1 : 0);
-    }
+    nvs_close(handle);
 
     ESP_LOGI(TAG, "JMRI settings loaded");
 }
@@ -790,8 +613,8 @@ void JmriConfigScreen::onBackButtonClicked(lv_event_t* e)
     screen->m_jsonClient.setConnectionStateCallback(nullptr);
     screen->m_wiThrottleClient.setConnectionStateCallback(nullptr);
     
-    // Load main screen (this will make the JMRI config screen inactive)
-    show_main_screen();
+    // Back to settings, which is where this screen is reached from.
+    show_settings_screen();
     
     // Schedule deletion of this JMRI config screen after a short delay
     // This allows LVGL to finish any pending operations
@@ -807,16 +630,8 @@ void JmriConfigScreen::clearUiPointers()
     m_serverIpInput = nullptr;
     m_wiThrottlePortInput = nullptr;
     m_powerManagerInput = nullptr;
-    m_speedStepsInput = nullptr;
-    m_transportDropdown = nullptr;
-    m_transportNoteLabel = nullptr;
-    m_statusWifiValue = nullptr;
     m_statusWiThrottleValue = nullptr;
     m_statusJsonValue = nullptr;
-    m_statusEncoder1Value = nullptr;
-    m_statusEncoder2Value = nullptr;
-    m_statusSoftwareValue = nullptr;
-    m_statusHardwareValue = nullptr;
     m_connectButton = nullptr;
     m_disconnectButton = nullptr;
     m_backButton = nullptr;

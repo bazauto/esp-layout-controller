@@ -3,20 +3,21 @@
 #include "../ui/WiFiConfigScreen.h"
 #include "../ui/JmriConfigScreen.h"
 #include "../ui/OrchestratorConfigScreen.h"
+#include "../ui/SettingsScreen.h"
 #include "../communication/WiThrottleClient.h"
 #include "../communication/WiThrottleBackend.h"
 #include "../communication/OrchestratorClient.h"
 #include "../communication/OrchestratorBackend.h"
 #include "../communication/JmriJsonClient.h"
+#include "ThrottleController.h"
+#include "WiFiController.h"
+#include "JmriConnectionController.h"
+#include "../hardware/RotaryEncoderHal.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 static const char* TAG = "AppController";
-#include "ThrottleController.h"
-#include "WiFiController.h"
-#include "JmriConnectionController.h"
-#include "../hardware/RotaryEncoderHal.h"
 
 AppController& AppController::instance()
 {
@@ -158,6 +159,20 @@ void AppController::showWiFiConfigScreen()
         m_wifiConfigScreen = std::make_unique<WiFiConfigScreen>(*manager);
     }
     m_wifiConfigScreen->create();
+}
+
+void AppController::showSettingsScreen()
+{
+    initialise();
+
+    // Rebuilt each time rather than kept: the status rows it shows depend on
+    // the selected transport, and that can change while the device runs.
+    m_settingsScreen = std::make_unique<SettingsScreen>(m_throttleController.get(),
+                                                        m_wifiController.get(),
+                                                        m_rotaryEncoderHal.get(),
+                                                        m_jmriClient.get(),
+                                                        m_wiThrottleClient.get());
+    m_settingsScreen->create();
 }
 
 void AppController::showJmriConfigScreen()
