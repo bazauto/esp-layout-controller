@@ -75,7 +75,7 @@ $env:ESP_PORT = "COM5"
 .\tools\ensure-idf.ps1; idf.py -p $env:ESP_PORT build flash monitor
 ```
 
-The first build will download managed components from the ESP-IDF component registry. To exit the serial monitor, press `Ctrl-]`.
+The first build downloads LVGL and the Espressif components from the component registry into `managed_components/`, at the versions `dependencies.lock` pins — so it needs network access. Later builds work offline. To exit the serial monitor, press `Ctrl-]`.
 
 ### Run Tests
 
@@ -96,8 +96,9 @@ All core phases are complete. The device is fully functional with touchscreen UI
 The first-party application code is licensed under the [MIT License](LICENSE) — `main/`
 (except four Espressif-derived files), `tools/` and the documentation.
 
-This repository also redistributes LVGL and two Espressif components under `components/`,
-which are **not** covered by that grant and carry their own licences. Full detail — what the
-MIT grant covers, each component's licence and notice location, the Apache-2.0 modification
-notices on the Espressif-derived files, and what a published binary would need — is in
+No third-party source is committed here. LVGL and the Espressif components are fetched by the
+IDF component manager into the gitignored `managed_components/`, pinned by
+`dependencies.lock`, and carry their own licences. Full detail — what the MIT grant covers,
+each component's licence and notice location, the Apache-2.0 modification notices on the
+Espressif-derived files, and what a published binary would need — is in
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

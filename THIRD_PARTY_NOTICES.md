@@ -3,34 +3,29 @@
 The MIT Licence in [`LICENSE`](LICENSE) covers the **first-party application code only**:
 `main/` (except the Espressif-derived files listed below), `tools/` and the documentation.
 
-It does **not** cover the third-party components redistributed in this repository. Each is
-governed by its own licence and carries its own notice, reproduced in the location named.
+It does **not** cover the four Espressif-derived files in `main/`, listed below. Every other
+third-party component is fetched by the IDF component manager at build time rather than
+committed here, so this repository does not redistribute any of it.
 
 This file exists rather than a scope note inside `LICENSE` because GitHub detects a
 repository's licence by matching the text of that file. Extra prose inside it stops the match,
 and the repository shows as "Other" instead of MIT — which is worse than the ambiguity the
 note was trying to remove. Keep `LICENSE` as the unmodified MIT text and scope it here.
 
-## Vendored under `components/`
-
-Committed to this repository, so their notices travel with it. **Nothing under `components/`
-is first-party code.**
-
-| Component | Version | Licence | Notice |
-|---|---|---|---|
-| [LVGL](https://lvgl.io/) | 8.4.0 | MIT | `components/lvgl__lvgl/LICENCE.txt` |
-| ESP LCD Touch | 1.1.2 | Apache-2.0 | `components/espressif__esp_lcd_touch/license.txt` |
-| ESP LCD Touch GT911 | 1.1.1 | Apache-2.0 | `components/espressif__esp_lcd_touch_gt911/license.txt` |
-
 ## Resolved at build time
 
-Pulled by the IDF component manager, not redistributed here — `managed_components/` is
-gitignored.
+Declared in [`main/idf_component.yml`](main/idf_component.yml), pinned to exact versions and
+content hashes by [`dependencies.lock`](dependencies.lock), and fetched into
+`managed_components/`, which is gitignored. **None of it is redistributed by this
+repository** — each carries its own notice in the fetched copy, at the version the lock names.
 
-| Component | Version | Licence |
-|---|---|---|
-| ESP WebSocket Client | 1.6.1 | Apache-2.0 |
-| ESP-IDF | 5.5.2 | Apache-2.0 |
+| Component | Version | Licence | Notice, once fetched |
+|---|---|---|---|
+| [LVGL](https://lvgl.io/) | 8.4.0 | MIT | `managed_components/lvgl__lvgl/LICENCE.txt` |
+| ESP LCD Touch | 1.2.1 | Apache-2.0 | `managed_components/espressif__esp_lcd_touch/license.txt` |
+| ESP LCD Touch GT911 | 1.2.1 | Apache-2.0 | `managed_components/espressif__esp_lcd_touch_gt911/license.txt` |
+| ESP WebSocket Client | 1.8.0 | Apache-2.0 | `managed_components/espressif__esp_websocket_client/LICENSE` |
+| ESP-IDF | 5.5.2 | Apache-2.0 | supplied with the SDK |
 
 ## Espressif-derived files in `main/`
 
@@ -51,4 +46,5 @@ changed, the header carries a modification notice, as Apache-2.0 §4(b) requires
 
 No release artefacts are published today. A published firmware binary links all of the above,
 and both MIT and Apache-2.0 require their notices accompany it — so ship this file with the
-release rather than the `.bin` alone.
+release rather than the `.bin` alone. Not committing the sources changes nothing here —
+distributing a binary is distribution regardless of where the sources that built it came from.
