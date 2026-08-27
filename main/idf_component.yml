@@ -1,11 +1,19 @@
 dependencies:
+  # 5.2 is the floor espressif/esp_lcd_touch_gt911 1.2.x declares; anything lower
+  # cannot resolve this manifest.
   idf:
-    version: '>=5.1.0'
+    version: '>=5.2'
 
+  # Pinned to the 8.4.x series. LVGL 9 is a breaking rewrite, and a looser range
+  # would let a fresh resolve pick up a different 8.x than dependencies.lock pins.
   lvgl/lvgl:
-    version: '>8.3.9,<9'
+    version: '~8.4.0'
     public: true
 
-  esp_lcd_touch_gt911: ^1
+  # main/lvgl_port.c includes esp_lcd_touch.h directly, so it is a direct
+  # dependency here rather than only a transitive one of the GT911 driver.
+  espressif/esp_lcd_touch: '^1'
+
+  espressif/esp_lcd_touch_gt911: '^1'
 
   espressif/esp_websocket_client: '*'
