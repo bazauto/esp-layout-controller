@@ -3,9 +3,10 @@
 The MIT Licence in [`LICENSE`](LICENSE) covers the **first-party application code only**:
 `main/` (except the Espressif-derived files listed below), `tools/` and the documentation.
 
-It does **not** cover the four Espressif-derived files in `main/`, listed below. Every other
-third-party component is fetched by the IDF component manager at build time rather than
-committed here, so this repository does not redistribute any of it.
+**No third-party source is committed to this repository.** Everything else the firmware links
+— LVGL, the Espressif drivers, ESP-IDF itself — is fetched by the IDF component manager at
+build time, so this repository redistributes none of it. The only third-party-derived code it
+does ship is the four files in `main/` listed below.
 
 This file exists rather than a scope note inside `LICENSE` because GitHub detects a
 repository's licence by matching the text of that file. Extra prose inside it stops the match,
