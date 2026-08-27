@@ -20,6 +20,7 @@ The ESP32-S3 is dual-core. LVGL rendering runs on a dedicated task; network I/O 
 | `orch_connect` | 6 KB | 5 | Wait for WiFi → orchestrator login → fetch roster | `AppController::startOrchestratorConnectTask()` |
 | `orch_ui_conn` | 6 KB | 5 | Same, triggered by the config screen's Connect button | `OrchestratorConfigScreen::onConnectClicked()` |
 | `websocket_task` | 6 KB | — | Orchestrator control-plane receive loop (owned by `esp_websocket_client`) | `OrchestratorClient::connect()` |
+| `track_power` | 4 KB | 5 | One-shot track-power write | `ThrottleController::requestTrackPower()` |
 
 `throttle_poll` is created **only when the active `ThrottleBackend` reports
 `requiresPolling()`**. WiThrottle does, because it answers queries rather than volunteering
@@ -31,9 +32,10 @@ task is created at all and its 4 KB stack is never allocated.
 no orchestrator task does; under the orchestrator, `orch_connect` starts and JMRI
 auto-connect is never begun. Nothing sits retrying a server the operator has not chosen.
 
-`orch_connect` and `orch_ui_conn` both exist because the orchestrator login is a **blocking
-HTTP round trip** and the roster is two more. None of that may happen on the LVGL task
-(F-05). Both are one-shot: they delete themselves when done.
+`orch_connect`, `orch_ui_conn` and `track_power` all exist for the same reason: the
+orchestrator's login, roster read and power command are **blocking HTTP round trips**, and
+none of that may happen on the LVGL task (F-05). `track_power` in particular is spawned
+straight from a button handler. All three are one-shot and delete themselves when done.
 
 ---
 

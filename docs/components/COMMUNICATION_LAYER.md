@@ -26,6 +26,22 @@ and that difference surfaces here rather than as a fake session.
 | `providesRoster()` | No selectable roster — the controller must not offer loco selection |
 | `providesFunctionLabels()` | UI falls back to `F0`…`F28` |
 | `requiresPolling()` | State arrives unprompted; no `throttle_poll` task is created |
+| `supportsTrackPower()` | The power button is **hidden**, not left dead |
+
+### Track power lives on this port too
+
+Strictly a layout command rather than a throttle one, but it rides the same
+connection and the UI needs one place to ask — so it is here rather than in a second
+port with two more adapters.
+
+`TrackPower::UNKNOWN` is **not** "off". It means nothing has told us yet, and showing it as
+off would claim the rails are dead when nobody knows. The UI renders it as its own state.
+
+Everything the UI needs — connection state, knob gating, functions, track power — comes
+through `ThrottleController` and this port. Reaching past it into a concrete client is the
+bug that made the orchestrator transport look dead: the knobs were gated on
+`WiThrottleClient::isConnected()`, and the power bar read `JmriJsonClient` directly, neither
+of which is connected when the orchestrator is the selected transport.
 
 ### Threading
 
@@ -117,11 +133,38 @@ Refused, each with a log line and no callback:
 
 Within a `STATE_SNAPSHOT`, one bad loco entry is skipped without costing the rest.
 
-### Roster
+### Roster and track power are REST, not WebSocket
 
-A REST read (`GET /api/layouts/{id}/locos`), not a control-plane message: the snapshot
-carries loco state keyed by address but no names. The layout id comes from `GET /api/layouts`.
-Built aside and swapped in, so a partly-built roster is never visible to the carousel.
+The `ClientMessage` union has no track-power member and the snapshot carries loco state keyed
+by address but no names, so both are HTTP:
+
+| Need | Call |
+|------|------|
+| Roster | `GET /api/layouts/{id}/locos` |
+| Track power | `POST /api/layouts/{id}/dcc-link/power` with `{"on": bool}` |
+
+The layout id comes from `GET /api/layouts`, fetched once and cached. The roster is built
+aside and swapped in, so a partly-built roster is never visible to the carousel.
+
+The power POST's **reply body is deliberately ignored**. The `DCC_LINK` event pushed the
+moment it lands is what tells us the truth — that is the route's own contract, not our
+preference. `DCC_LINK` is also read off the snapshot, so the button is right from the first
+frame rather than waiting for the next change.
+
+### CONFIG_WS_BUFFER_SIZE, and why it is not the client's buffer_size
+
+`esp_websocket_client_config_t::buffer_size` is the **frame** buffer. The HTTP Upgrade
+handshake is built and read in a *separate* buffer sized by `CONFIG_WS_BUFFER_SIZE`
+(`sdkconfig.defaults`). Raising the former does nothing for the latter.
+
+`transport_ws` reads until it finds the header terminator, then **still fails** if the buffer
+filled. The orchestrator pushes a whole-layout `STATE_SNAPSHOT` the instant the socket opens,
+so the `101` and a chunk of that snapshot regularly arrive in one TCP read — which is why
+`transport_ws: Header size exceeded buffer size` was intermittent rather than constant. It
+depends on packet timing, not on header length.
+
+Set to **16384**. It must exceed the response *plus* whatever of the first frame arrives with
+it, so a layout that grows enough to inflate the snapshot could eventually need more.
 
 ---
 
