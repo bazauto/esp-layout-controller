@@ -1,4 +1,5 @@
 #include "OrchestratorConfigScreen.h"
+#include "UiTheme.h"
 
 #include "../communication/OrchestratorClient.h"
 #include "../controller/AppController.h"
@@ -71,20 +72,31 @@ void OrchestratorConfigScreen::clearUiPointers()
 lv_obj_t* OrchestratorConfigScreen::create()
 {
     m_screen = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(m_screen, lv_color_hex(0x1a1a1a), 0);
-    lv_scr_load(m_screen);
+    lv_obj_set_style_bg_color(m_screen, UiTheme::colour(UiTheme::SURFACE_SCREEN), 0);
+
+    // Same shape as the other screens: scrolling content above, a fixed button
+    // bar pinned to the bottom. This screen originally put its buttons inline
+    // with the fields, which read as a different app.
+    const int buttonAreaHeight = BUTTON_HEIGHT + 2 * PADDING;
 
     lv_obj_t* content = lv_obj_create(m_screen);
-    lv_obj_remove_style_all(content);
-    lv_obj_set_size(content, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_align(content, LV_ALIGN_TOP_MID, 0, PADDING);
+    lv_obj_set_size(content, SCREEN_WIDTH, SCREEN_HEIGHT - buttonAreaHeight);
+    lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(content, PADDING, 0);
+    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(content, 6, 0);
     lv_obj_set_style_pad_row(content, 6, 0);
+
+    lv_obj_t* buttonContainer = lv_obj_create(m_screen);
+    lv_obj_set_size(buttonContainer, SCREEN_WIDTH, buttonAreaHeight);
+    lv_obj_align(buttonContainer, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_clear_flag(buttonContainer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(buttonContainer, 0, 0);
 
     createHeader(content);
     createFields(content);
-    createButtons(content);
+    createButtons(buttonContainer);
     createKeyboard();
 
     loadSettings();
@@ -97,6 +109,7 @@ lv_obj_t* OrchestratorConfigScreen::create()
     m_statusTimer = lv_timer_create(statusTimerCb, 500, this);
 
     updateStatus();
+    lv_scr_load(m_screen);
     return m_screen;
 }
 
@@ -109,7 +122,7 @@ void OrchestratorConfigScreen::createHeader(lv_obj_t* parent)
 
     lv_obj_t* subtitle = lv_label_create(parent);
     lv_label_set_text(subtitle, "WebSocket control plane. Select it as the transport on the settings screen.");
-    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x999999), 0);
+    lv_obj_set_style_text_color(subtitle, UiTheme::colour(UiTheme::TEXT_MUTED), 0);
 
     lv_obj_t* statusRow = lv_obj_create(parent);
     lv_obj_remove_style_all(statusRow);
@@ -119,11 +132,11 @@ void OrchestratorConfigScreen::createHeader(lv_obj_t* parent)
 
     lv_obj_t* statusLabel = lv_label_create(statusRow);
     lv_label_set_text(statusLabel, "Status:");
-    lv_obj_set_style_text_color(statusLabel, lv_color_hex(0xcccccc), 0);
+    lv_obj_set_style_text_color(statusLabel, UiTheme::colour(UiTheme::TEXT_LABEL), 0);
 
     m_statusValue = lv_label_create(statusRow);
     lv_label_set_text(m_statusValue, "disconnected");
-    lv_obj_set_style_text_color(m_statusValue, lv_color_hex(0xcccccc), 0);
+    lv_obj_set_style_text_color(m_statusValue, UiTheme::colour(UiTheme::TEXT_LABEL), 0);
 }
 
 void OrchestratorConfigScreen::createFields(lv_obj_t* parent)
@@ -151,7 +164,7 @@ void OrchestratorConfigScreen::createFields(lv_obj_t* parent)
     auto addLabel = [](lv_obj_t* parentObj, const char* text) {
         lv_obj_t* label = lv_label_create(parentObj);
         lv_label_set_text(label, text);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xcccccc), 0);
+        lv_obj_set_style_text_color(label, UiTheme::colour(UiTheme::TEXT_LABEL), 0);
         lv_obj_set_width(label, LV_PCT(100));
     };
 
@@ -195,15 +208,15 @@ void OrchestratorConfigScreen::createButtons(lv_obj_t* parent)
 {
     lv_obj_t* row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_size(row, LV_PCT(100), BUTTON_HEIGHT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row, 10, 0);
-    lv_obj_set_style_pad_top(row, 8, 0);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
 
     auto addButton = [&](const char* text, lv_event_cb_t handler, uint32_t colour) {
         lv_obj_t* button = lv_btn_create(row);
-        lv_obj_set_size(button, 180, BUTTON_HEIGHT);
-        lv_obj_set_style_bg_color(button, lv_color_hex(colour), 0);
+        lv_obj_set_size(button, 200, BUTTON_HEIGHT);
+        lv_obj_set_style_bg_color(button, UiTheme::colour(colour), 0);
         lv_obj_add_event_cb(button, handler, LV_EVENT_CLICKED, this);
         lv_obj_t* label = lv_label_create(button);
         lv_label_set_text(label, text);
@@ -211,9 +224,9 @@ void OrchestratorConfigScreen::createButtons(lv_obj_t* parent)
         return button;
     };
 
-    addButton("Save", onSaveClicked, 0x2d6a4f);
-    m_connectButton = addButton("Save & Connect", onConnectClicked, 0x1d4e89);
-    addButton("Back", onBackClicked, 0x555555);
+    addButton("Save", onSaveClicked, UiTheme::BUTTON_POSITIVE);
+    m_connectButton = addButton("Save & Connect", onConnectClicked, UiTheme::BUTTON_PRIMARY);
+    addButton("Back", onBackClicked, UiTheme::BUTTON_NEUTRAL);
 }
 
 void OrchestratorConfigScreen::createKeyboard()
@@ -295,20 +308,20 @@ void OrchestratorConfigScreen::updateStatus()
 
     if (!m_client) {
         lv_label_set_text(m_statusValue, "not the selected transport");
-        lv_obj_set_style_text_color(m_statusValue, lv_color_hex(0x999999), 0);
+        lv_obj_set_style_text_color(m_statusValue, UiTheme::colour(UiTheme::TEXT_MUTED), 0);
         return;
     }
 
     const OrchestratorClient::ConnectionState state = m_client->getState();
     lv_label_set_text(m_statusValue, OrchestratorClient::stateName(state));
 
-    uint32_t colour = 0xcccccc;
+    uint32_t colour = UiTheme::TEXT_LABEL;
     switch (state) {
-        case OrchestratorClient::ConnectionState::CONNECTED:      colour = 0x40c057; break;
+        case OrchestratorClient::ConnectionState::CONNECTED:      colour = UiTheme::TEXT_OK;      break;
         case OrchestratorClient::ConnectionState::AUTHENTICATING:
-        case OrchestratorClient::ConnectionState::CONNECTING:     colour = 0xfab005; break;
-        case OrchestratorClient::ConnectionState::FAILED:         colour = 0xe03131; break;
-        default:                                                  colour = 0x999999; break;
+        case OrchestratorClient::ConnectionState::CONNECTING:     colour = UiTheme::TEXT_WARNING; break;
+        case OrchestratorClient::ConnectionState::FAILED:         colour = UiTheme::TEXT_ERROR;   break;
+        default:                                                  colour = UiTheme::TEXT_MUTED;   break;
     }
     lv_obj_set_style_text_color(m_statusValue, lv_color_hex(colour), 0);
 }

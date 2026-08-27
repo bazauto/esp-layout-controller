@@ -1,4 +1,5 @@
 #include "WiFiConfigScreen.h"
+#include "UiTheme.h"
 #include "wrappers/wifi_config_wrapper.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -49,7 +50,7 @@ lv_obj_t* WiFiConfigScreen::create()
 {
     // Create screen
     m_screen = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(m_screen, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(m_screen, UiTheme::colour(UiTheme::SURFACE_SCREEN), 0);
     
     // Button container height with padding
     const int buttonAreaHeight = BUTTON_HEIGHT + 3 * PADDING;
@@ -198,7 +199,7 @@ void WiFiConfigScreen::createButtonSection(lv_obj_t* parent)
     lv_label_set_text(connectLabel, "Connect");
     lv_obj_center(connectLabel);
     lv_obj_add_event_cb(m_connectButton, onConnectButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(m_connectButton, lv_color_hex(0x00AA00), 0);
+    lv_obj_set_style_bg_color(m_connectButton, UiTheme::colour(UiTheme::BUTTON_POSITIVE), 0);
     
     // Disconnect button (orange - just disconnects, keeps credentials)
     m_disconnectButton = lv_btn_create(buttonContainer);
@@ -207,7 +208,7 @@ void WiFiConfigScreen::createButtonSection(lv_obj_t* parent)
     lv_label_set_text(disconnectLabel, "Disconnect");
     lv_obj_center(disconnectLabel);
     lv_obj_add_event_cb(m_disconnectButton, onDisconnectButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(m_disconnectButton, lv_color_hex(0xFF8800), 0);
+    lv_obj_set_style_bg_color(m_disconnectButton, UiTheme::colour(UiTheme::BUTTON_CAUTION), 0);
     
     // Forget button (red - disconnects and clears credentials)
     m_forgetButton = lv_btn_create(buttonContainer);
@@ -216,7 +217,7 @@ void WiFiConfigScreen::createButtonSection(lv_obj_t* parent)
     lv_label_set_text(forgetLabel, "Forget");
     lv_obj_center(forgetLabel);
     lv_obj_add_event_cb(m_forgetButton, onForgetButtonClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(m_forgetButton, lv_color_hex(0xAA0000), 0);
+    lv_obj_set_style_bg_color(m_forgetButton, UiTheme::colour(UiTheme::BUTTON_DESTRUCTIVE), 0);
     
     // Back button
     m_backButton = lv_btn_create(buttonContainer);
@@ -536,7 +537,7 @@ void WiFiConfigScreen::createKeyboard()
     lv_label_set_text(m_keyboardLabel, "");
     lv_obj_set_style_text_font(m_keyboardLabel, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(m_keyboardLabel, lv_color_white(), 0);
-    lv_obj_set_style_bg_color(m_keyboardLabel, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_bg_color(m_keyboardLabel, UiTheme::colour(UiTheme::SURFACE_OVERLAY), 0);
     lv_obj_set_style_bg_opa(m_keyboardLabel, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_hor(m_keyboardLabel, 10, 0);
     lv_obj_set_style_pad_ver(m_keyboardLabel, 8, 0);

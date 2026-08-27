@@ -27,7 +27,7 @@ main/
   ├── communication/  # ThrottleBackend port + transports (WiThrottle; orchestrator WebSocket)
   ├── model/          # Data (Loco, Throttle, Knob)
   ├── controller/     # Business logic
-  └── ui/             # LVGL screens
+  └── ui/             # LVGL screens; colours from UiTheme.h, never raw hex
 ```
 
 ### Class Structure

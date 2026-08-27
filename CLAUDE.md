@@ -110,6 +110,10 @@ namespace and key map, and the authoritative list of what persists.
   injected via constructor, const-correct.
 - Logging is `ESP_LOG*` with a file-local `static const char* TAG`.
 - New source files must be added to `APP_SRCS` in `main/CMakeLists.txt` — there is no glob.
+- **UI colours come from `main/ui/UiTheme.h`**, never a raw hex literal or
+  `lv_palette_main`. Buttons are desaturated so a screenful reads as one surface; status
+  text stays brighter. Names say what a colour *means* (`BUTTON_DESTRUCTIVE`), not what it
+  looks like. Screens are scrolling content above a fixed bottom button bar.
 - **British English** in comments, docs, and commit messages.
 - `sdkconfig` is generated and git-ignored. `sdkconfig.defaults` and
   `sdkconfig.test.defaults` are the tracked sources of truth — change those, never the

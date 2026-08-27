@@ -1,4 +1,5 @@
 #include "PowerStatusBar.h"
+#include "../UiTheme.h"
 
 #include <string>
 
@@ -49,7 +50,7 @@ lv_obj_t* PowerStatusBar::create(lv_obj_t* parent, ThrottleController* throttleC
 
     m_connectionStatusLabel = lv_label_create(m_container);
     lv_label_set_text(m_connectionStatusLabel, LV_SYMBOL_CLOSE " Disconnected");
-    lv_obj_set_style_text_color(m_connectionStatusLabel, lv_color_hex(0xFF0000), 0);
+    lv_obj_set_style_text_color(m_connectionStatusLabel, UiTheme::colour(UiTheme::TEXT_ERROR), 0);
     lv_obj_center(m_connectionStatusLabel);
 
     if (m_throttleController) {
@@ -129,17 +130,17 @@ void PowerStatusBar::updateTrackPowerButton(ThrottleBackend::TrackPower state)
 
     switch (state) {
         case ThrottleBackend::TrackPower::ON:
-            color = 0x00AA00;
+            color = UiTheme::STATE_ACTIVE;
             stateText = "Power On";
             break;
         case ThrottleBackend::TrackPower::OFF:
-            color = 0xAA0000;
+            color = UiTheme::STATE_FAULT;
             stateText = "Power Off";
             break;
         default:
             // Not "off": nothing has told us yet, and showing it as off would
             // claim the rails are dead when nobody knows.
-            color = 0x888888;
+            color = UiTheme::STATE_INACTIVE;
             stateText = "Power ?";
             break;
     }
@@ -154,7 +155,7 @@ void PowerStatusBar::updateConnectionStatus(bool connected)
 
     const char* icon = connected ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE;
     const char* text = connected ? " Connected" : " Disconnected";
-    const uint32_t color = connected ? 0x00AA00 : 0x888888;
+    const uint32_t color = connected ? UiTheme::TEXT_OK : UiTheme::TEXT_MUTED;
 
     const std::string statusText = std::string(icon) + text;
     lv_label_set_text(m_connectionStatusLabel, statusText.c_str());

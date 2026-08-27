@@ -1,4 +1,5 @@
 #include "VirtualEncoderPanel.h"
+#include "../UiTheme.h"
 #include "esp_log.h"
 
 static const char* TAG = "VirtualEncoderPanel";
@@ -53,7 +54,7 @@ lv_obj_t* VirtualEncoderPanel::create(lv_obj_t* parent,
     m_rotateCCWButton = lv_btn_create(m_panel);
     lv_obj_set_size(m_rotateCCWButton, 60, 40);
     lv_obj_add_event_cb(m_rotateCCWButton, onRotateCCWClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(m_rotateCCWButton, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_bg_color(m_rotateCCWButton, UiTheme::colour(UiTheme::BUTTON_PRIMARY), 0);
     
     lv_obj_t* ccwLabel = lv_label_create(m_rotateCCWButton);
     lv_label_set_text(ccwLabel, LV_SYMBOL_LEFT);
@@ -63,7 +64,7 @@ lv_obj_t* VirtualEncoderPanel::create(lv_obj_t* parent,
     m_pressButton = lv_btn_create(m_panel);
     lv_obj_set_size(m_pressButton, 60, 40);
     lv_obj_add_event_cb(m_pressButton, onPressClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(m_pressButton, lv_palette_main(LV_PALETTE_GREEN), 0);
+    lv_obj_set_style_bg_color(m_pressButton, UiTheme::colour(UiTheme::BUTTON_POSITIVE), 0);
     
     lv_obj_t* pressLabel = lv_label_create(m_pressButton);
     lv_label_set_text(pressLabel, LV_SYMBOL_OK);
@@ -73,7 +74,7 @@ lv_obj_t* VirtualEncoderPanel::create(lv_obj_t* parent,
     m_rotateCWButton = lv_btn_create(m_panel);
     lv_obj_set_size(m_rotateCWButton, 60, 40);
     lv_obj_add_event_cb(m_rotateCWButton, onRotateCWClicked, LV_EVENT_CLICKED, this);
-    lv_obj_set_style_bg_color(m_rotateCWButton, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_bg_color(m_rotateCWButton, UiTheme::colour(UiTheme::BUTTON_PRIMARY), 0);
     
     lv_obj_t* cwLabel = lv_label_create(m_rotateCWButton);
     lv_label_set_text(cwLabel, LV_SYMBOL_RIGHT);
@@ -101,9 +102,9 @@ void VirtualEncoderPanel::updateKnobButtons()
     for (int i = 0; i < 2; i++) {
         if (m_knobSelectButtons[i]) {
             if (i == m_activeKnob) {
-                lv_obj_set_style_bg_color(m_knobSelectButtons[i], lv_palette_main(LV_PALETTE_GREEN), 0);
+                lv_obj_set_style_bg_color(m_knobSelectButtons[i], UiTheme::colour(UiTheme::STATE_ACTIVE), 0);
             } else {
-                lv_obj_set_style_bg_color(m_knobSelectButtons[i], lv_palette_main(LV_PALETTE_GREY), 0);
+                lv_obj_set_style_bg_color(m_knobSelectButtons[i], UiTheme::colour(UiTheme::STATE_INACTIVE), 0);
             }
         }
     }
