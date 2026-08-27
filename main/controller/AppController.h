@@ -3,6 +3,7 @@
 #include <memory>
 
 class WiThrottleClient;
+class ThrottleBackend;
 class JmriJsonClient;
 class ThrottleController;
 class MainScreen;
@@ -44,6 +45,11 @@ private:
     std::unique_ptr<JmriConfigScreen> m_jmriConfigScreen;
     std::unique_ptr<WiThrottleClient> m_wiThrottleClient;
     std::unique_ptr<JmriJsonClient> m_jmriClient;
+    /** Held as the port, not the concrete adapter: the transport becomes a
+     * runtime choice, and this is the pointer that will change. Declared after
+     * the client it wraps and before the controller that borrows it, so
+     * reverse-order destruction tears them down safely. */
+    std::unique_ptr<ThrottleBackend> m_throttleBackend;
     std::unique_ptr<ThrottleController> m_throttleController;
     std::unique_ptr<WiFiController> m_wifiController;
     std::unique_ptr<JmriConnectionController> m_jmriConnectionController;

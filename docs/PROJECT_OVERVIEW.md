@@ -25,7 +25,10 @@ All core phases complete. The device is fully functional with touchscreen UI, Wi
     - Translates encoder base addresses (0x36, 0x37) by XOR 0x40
     - Final addresses: 0x76 (encoder 1), 0x77 (encoder 2)
   - **STATUS**: ✅ Integrated and working
-- **Communication**: WiFi (WiThrottle protocol), MQTT (cab signals)
+- **Communication**: WiFi. Locos are driven through the `ThrottleBackend` port; WiThrottle
+  to JMRI is the transport that exists today, the layout orchestrator's WebSocket control
+  plane is the second one being added. **MQTT is not this device's transport** — it is the
+  hardware telemetry bus for the sensor and point boards.
 
 ## Core Features
 
@@ -68,11 +71,13 @@ All core phases complete. The device is fully functional with touchscreen UI, Wi
   - Receive updates from other throttles controlling same locos
 - **Multi-Throttle Support**: Handle concurrent control from multiple sources
 
-### 5. MQTT Integration (Future Phase)
-- Subscribe to signal state topics
-- Display cab signals for each controlled loco
-- Provide visual warnings/danger indicators
-- Operator alert system for track ahead conditions
+### 5. Orchestrator WebSocket Transport (In Progress)
+- Second `ThrottleBackend` alongside WiThrottle, selectable at runtime
+- Reaches the layout orchestrator over its `/ws` control plane, authenticated with the
+  session cookie from `POST /api/auth/login`
+- Speaks the `ClientMessage` / `ServerMessage` vocabulary owned by
+  `bazauto/layout-orchestration`
+- Tracking issue: `bazauto/layout-orchestration#9`
 
 ### 6. Layout Control Features
 - Track power on/off via JMRI JSON/HTTP API
@@ -105,6 +110,7 @@ Keep layout wiring inside `MainScreen` while the layout is still evolving.
 
 **Singletons (persist across UI changes):**
 - **WiThrottleClient**: Network communication with JMRI
+- **ThrottleBackend**: the transport the controller drives locos through (borrowed by ThrottleController, not owned by it)
 - **JmriJsonClient**: JSON API for track power control
 - **ThrottleController**: Application state coordinator
   - Owns 4 Throttle instances
@@ -159,11 +165,11 @@ void show_main_screen(void) {
   - Route activation (future)
   - HTTP client with JSON parsing
 
-- **MQTTClient Class**: MQTT communication (future)
-  - Connection management
-  - Topic subscription
-  - Message handling
-  - Signal state parsing
+- **ThrottleBackend**: transport-neutral port the controller drives locos through
+  - `WiThrottleBackend` adapts the existing WiThrottle client
+  - An orchestrator WebSocket backend is the second implementation (in progress)
+  - Capability queries (roster, acquisition, function labels, polling) rather than one
+    protocol impersonating the other
 
 #### 3. Model Layer
 - **Locomotive Class**: Loco data and state
@@ -258,7 +264,7 @@ delete ui;  // Safe! Controller still has all state
 #### 6. State Management
 - **AppState Class**: Global application state
   - Active throttle selections
-  - Connection status (WiFi, JMRI, MQTT)
+  - Connection status (WiFi, and the active throttle transport)
   - System mode
 
 #### 7. Threading & Concurrency ⚠️ CRITICAL
@@ -267,7 +273,7 @@ delete ui;  // Safe! Controller still has all state
 ```
 Core 0: Network Tasks           Core 1: UI Task
   ├─ WiThrottle RX Task    →    ├─ LVGL Rendering
-  ├─ MQTT Task              →    └─ LVGL Event Handling
+  ├─ Orchestrator WS Task →    └─ LVGL Event Handling
   └─ WebSocket Task         →
 ```
 
@@ -286,7 +292,7 @@ void onNetworkCallback(void* userData) {
 ```
 
 **When locks are required:**
-- ✅ Always from network receive tasks (WiThrottle, MQTT, WebSocket)
+- ✅ Always from network receive tasks (WiThrottle, WebSocket)
 - ✅ Always from FreeRTOS timers
 - ✅ Always from hardware interrupt handlers
 - ❌ Never needed within LVGL event callbacks (already on UI task)
@@ -350,12 +356,11 @@ void onNetworkCallback(void* userData) {
 - [x] WiFi configuration UI
 - [x] Power status display
 
-### Future: MQTT & Cab Signals
-- [ ] MQTT client implementation
-- [ ] Signal state subscription
-- [ ] Cab signal display
-- [ ] Warning/danger visual indicators
-- [ ] Alert system
+### In Progress: Orchestrator WebSocket Transport
+- [x] `ThrottleBackend` port, with `WiThrottleBackend` behind it
+- [ ] Orchestrator WebSocket backend (login, cookie, `/ws`, message parsing)
+- [ ] `operator` credential in NVS
+- [ ] Runtime transport picker in the config screen, persisted to NVS
 
 ## Key Considerations & Questions
 
@@ -406,11 +411,10 @@ void onNetworkCallback(void* userData) {
 - Heartbeat requirements
 - Error/status codes
 
-### MQTT Topics & Format
-- What are the topic patterns for signals?
-- Message payload format?
-- QoS requirements?
-- Retained messages?
+### Orchestrator Control Plane
+Not open questions — the contract is defined and stable in
+`bazauto/layout-orchestration` → `packages/backend/src/domain/types.ts`, which is
+authoritative for this firmware. What remains is implementing against it.
 
 ### System Details
 - **JMRI Version**: Latest (as of 2026)

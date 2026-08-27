@@ -24,7 +24,7 @@ ESP32-S3 model railway control interface: LVGL UI, WiThrottle protocol, 4 thrott
 ```
 main/
   ├── hardware/       # HAL (encoders, I2C)
-  ├── communication/  # WiThrottle, MQTT
+  ├── communication/  # ThrottleBackend port + transports (WiThrottle; orchestrator WebSocket)
   ├── model/          # Data (Loco, Throttle, Knob)
   ├── controller/     # Business logic
   └── ui/             # LVGL screens
@@ -45,13 +45,19 @@ main/
 ```
 Application Layer (controller/AppController.cpp)
   ├─> WiThrottleClient (singleton)
-  ├─> JmriJsonClient (singleton)  
+  ├─> JmriJsonClient (singleton)
+  ├─> ThrottleBackend (the transport in use; WiThrottleBackend wraps the client)
   └─> ThrottleController (singleton) ← OWNS ALL STATE
+       ├─> ThrottleBackend*  ← borrowed, NOT owned
        └─> Models (Throttle, Knob, Locomotive)
 
 UI Layer (MainScreen)
   └─> Raw pointers only, NEVER owns state
 ```
+
+**ThrottleController talks to `ThrottleBackend`, never to a concrete client.** Throttle ids
+across that port are plain `int` indices — WiThrottle's `'0' + id` character encoding lives
+in `WiThrottleBackend` and must not leak upward.
 
 **Pattern:**
 ```cpp

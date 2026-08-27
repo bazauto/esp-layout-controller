@@ -91,7 +91,7 @@ void RosterCarousel::update(ThrottleController* controller)
         return;
     }
 
-    WiThrottleClient::Locomotive entry;
+    ThrottleBackend::RosterEntry entry;
     std::string currentText = "Unknown";
     int currentAddress = 0;
     if (controller->getLocoAtRosterIndex(selection.rosterIndex, entry)) {

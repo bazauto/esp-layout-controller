@@ -16,6 +16,7 @@ sequenceDiagram
     participant TC as ThrottleController
     participant T as Throttle
     participant K as Knob
+    participant TB as ThrottleBackend
     participant WT as WiThrottleClient
     participant JMRI as JMRI Server
 
@@ -37,7 +38,8 @@ sequenceDiagram
     Note over T: → UNALLOCATED
     Note over T: Locomotive unique_ptr destroyed
 
-    TC->>WT: releaseLocomotive("2")
+    TC->>TB: releaseLocomotive(2)
+    TB->>WT: releaseLocomotive('2')
     WT->>JMRI: Release command
 
     TC->>MS: uiUpdateCallback()
