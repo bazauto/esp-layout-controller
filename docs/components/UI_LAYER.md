@@ -128,6 +128,25 @@ task would freeze every throttle at once (F-05).
 
 ## UI Components
 
+### PowerStatusBar
+
+**File:** `main/ui/components/PowerStatusBar.cpp/h`
+
+**Purpose:** Track power button and link status, driven by the **active transport** through
+`ThrottleController` — never by a concrete client.
+
+It previously read `JmriJsonClient` directly, so under the orchestrator transport the button
+did nothing and the label read "Disconnected" while the layout was in fact connected.
+
+- A transport answering `supportsTrackPower() == false` gets the button **hidden**, not left
+  dead for the operator to press and wonder about.
+- `TrackPower::UNKNOWN` renders as its own state ("Power ?"), not as off.
+- The press returns immediately: the orchestrator's power command is a blocking HTTP round
+  trip, so the write happens on a short-lived task (F-05). The button repaints when the
+  layout says power changed, not when we asked.
+
+---
+
 ### ThrottleMeter
 
 **File:** `main/ui/components/ThrottleMeter.cpp/h`

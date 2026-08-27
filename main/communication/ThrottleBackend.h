@@ -69,7 +69,20 @@ public:
         bool functionState = false;
     };
 
+    /**
+     * @brief Track power, as the layout reports it.
+     *
+     * UNKNOWN is not "off": it means nothing has told us yet. The UI must show
+     * it as its own state rather than implying the rails are dead.
+     */
+    enum class TrackPower {
+        OFF,
+        ON,
+        UNKNOWN
+    };
+
     using ConnectionStateCallback = std::function<void(ConnectionState state)>;
+    using TrackPowerCallback = std::function<void(TrackPower state)>;
     using ThrottleStateCallback = std::function<void(const ThrottleUpdate& update)>;
     using FunctionLabelsCallback =
         std::function<void(int throttleId, const std::vector<std::string>& labels)>;
@@ -181,4 +194,17 @@ public:
      * client the UI happens to know about.
      */
     virtual void setConnectionStateCallback(ConnectionStateCallback callback) = 0;
+
+    // --- Track power -------------------------------------------------------
+    //
+    // Strictly this is a layout command rather than a throttle one, but it
+    // rides the same connection and the UI needs one place to ask. Keeping it
+    // here rather than inventing a second port with two more adapters.
+
+    /** False means the UI must not offer a power button at all. */
+    virtual bool supportsTrackPower() const = 0;
+
+    virtual esp_err_t setTrackPower(bool on) = 0;
+    virtual TrackPower getTrackPower() const = 0;
+    virtual void setTrackPowerCallback(TrackPowerCallback callback) = 0;
 };

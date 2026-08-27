@@ -155,6 +155,10 @@ Decided 2026-08-24, **built 2026-08-27**. Recorded so it is not re-litigated:
   `TransportSettings` before anything connects. Under the orchestrator, JMRI auto-connect is
   never started; under WiThrottle, no orchestrator task exists. The device must never sit
   retrying a server the operator did not choose.
+- **The UI asks `ThrottleController`, never a concrete client.** Connection state, knob
+  gating, functions and track power all come through the port. Reaching past it into
+  `WiThrottleClient` or `JmriJsonClient` is what made the orchestrator transport look dead
+  on its first bench run — both are disconnected when the orchestrator is selected.
 - **`setSpeedAndDirection` is the call to use when both change.** `THROTTLE_COMMAND` carries
   the pair, and sending speed against the *old* direction first commands the loco faster the
   way it was already going before reversing it. The port's default implementation orders it
@@ -184,6 +188,10 @@ Things that look like bugs or oversights and are not. One line each.
   turned would move a model that no longer tracks anything real.
 - **`sdkconfig.tests` is tracked despite appearing in `.gitignore`** — it predates the
   ignore rule. `sdkconfig.test.defaults` is the file that actually matters.
+- **`CONFIG_WS_BUFFER_SIZE=16384` is not oversizing.** It sizes the WebSocket *handshake*
+  buffer, not the frame buffer, and must hold the `101` plus whatever of the orchestrator's
+  opening `STATE_SNAPSHOT` arrives in the same TCP read. Lowering it brings back an
+  intermittent `Header size exceeded buffer size` that kills the connection outright.
 
 ## Open limits
 

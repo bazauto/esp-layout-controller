@@ -56,6 +56,13 @@ public:
         STOP
     };
 
+    /** Main-track power, from `DccLinkView.mainPowerOn` (null = unknown). */
+    enum class TrackPower {
+        OFF,
+        ON,
+        UNKNOWN
+    };
+
     /** Mirrors SystemStatus: 'online' | 'safe-stop' | 'offline'. */
     enum class SystemStatus {
         ONLINE,
@@ -88,6 +95,7 @@ public:
     using LocoStateCallback = std::function<void(const LocoState& state)>;
     using SystemStatusCallback = std::function<void(SystemStatus status, const std::string& reason)>;
     using RosterCallback = std::function<void(const std::vector<RosterEntry>& roster)>;
+    using TrackPowerCallback = std::function<void(TrackPower state)>;
 
     OrchestratorClient();
     ~OrchestratorClient();
@@ -138,6 +146,23 @@ public:
      */
     esp_err_t sendEmergencyStop();
 
+    // --- Track power ------------------------------------------------------
+
+    /**
+     * @brief Turn main-track power on or off.
+     *
+     * `POST /api/layouts/{id}/dcc-link/power` — a REST call, because the
+     * control plane's `ClientMessage` union has no track-power member. The
+     * reply body is a courtesy; what tells us the truth is the `DCC_LINK`
+     * event pushed the moment it lands, so this does not parse the response.
+     *
+     * Blocking HTTP: never call from an LVGL event handler (F-05).
+     */
+    esp_err_t setTrackPower(bool on);
+
+    /** UNKNOWN until a DCC_LINK or snapshot has said otherwise. */
+    TrackPower getTrackPower() const;
+
     // --- Roster (REST, not WebSocket) -------------------------------------
 
     /**
@@ -157,6 +182,7 @@ public:
     void setLocoStateCallback(LocoStateCallback callback);
     void setSystemStatusCallback(SystemStatusCallback callback);
     void setRosterCallback(RosterCallback callback);
+    void setTrackPowerCallback(TrackPowerCallback callback);
 
     /** Seconds since the last message of any kind. Large means a stale link. */
     uint32_t secondsSinceLastMessage() const;
@@ -204,6 +230,10 @@ private:
     void handleStateSnapshot(const void* payload);
     void handleLocoState(const void* payload);
     void handleSystemStatus(const void* payload);
+    void handleDccLink(const void* payload);
+
+    /** Cached so the roster fetch and the power POST can both reach it. */
+    std::string getLayoutId();
 
     esp_err_t sendJson(const std::string& json);
 
@@ -226,6 +256,8 @@ private:
     std::string m_rxBuffer;
 
     SystemStatus m_systemStatus;
+    TrackPower m_trackPower;
+    std::string m_layoutId;
     std::vector<RosterEntry> m_roster;
     int64_t m_lastMessageUs;
 
@@ -233,6 +265,7 @@ private:
     LocoStateCallback m_locoStateCallback;
     SystemStatusCallback m_systemStatusCallback;
     RosterCallback m_rosterCallback;
+    TrackPowerCallback m_trackPowerCallback;
 
     mutable SemaphoreHandle_t m_stateMutex;
 };

@@ -123,6 +123,7 @@ OrchestratorClient::OrchestratorClient()
     , m_state(ConnectionState::DISCONNECTED)
     , m_port(DEFAULT_PORT)
     , m_systemStatus(SystemStatus::UNKNOWN)
+    , m_trackPower(TrackPower::UNKNOWN)
     , m_lastMessageUs(0)
     , m_stateMutex(nullptr)
 {
@@ -392,13 +393,14 @@ esp_err_t OrchestratorClient::openSocket(const std::string& host, uint16_t port)
     cfg.ping_interval_sec = 20;
     cfg.disable_auto_reconnect = false;
     cfg.task_stack = 6144;
-    // Also sizes the handshake buffer, which is what forced this up: the
-    // orchestrator re-issues the session cookie on every response (sliding
-    // expiry), so the upgrade's 101 carries a Set-Cookie on top of the usual
-    // headers and 4 KB overflowed with "Header size exceeded buffer size".
-    // It cost the first connection attempt outright and only recovered on the
-    // 10 s auto-reconnect.
-    cfg.buffer_size = 8192;
+    // Frame buffer only. It does NOT size the HTTP Upgrade handshake -- that
+    // is CONFIG_WS_BUFFER_SIZE in sdkconfig.defaults, and it is what
+    // "transport_ws: Header size exceeded buffer size" is complaining about.
+    // Raising this instead does nothing for the handshake.
+    //
+    // A whole-layout STATE_SNAPSHOT is larger than this and arrives split
+    // across several events; m_rxBuffer reassembles it.
+    cfg.buffer_size = 4096;
 
     m_client = esp_websocket_client_init(&cfg);
     if (!m_client) {
@@ -544,6 +546,8 @@ void OrchestratorClient::handleMessage(const std::string& json)
         handleLocoState(payload);
     } else if (type == "SYSTEM_STATUS") {
         handleSystemStatus(payload);
+    } else if (type == "DCC_LINK") {
+        handleDccLink(payload);
     } else if (type == "ERROR") {
         std::string message;
         if (payload && jsonString(payload, "message", message)) {
@@ -589,6 +593,13 @@ void OrchestratorClient::handleStateSnapshot(const void* payloadPtr)
                 callback(status, reason);
             }
         }
+    }
+
+    // Track power rides in on the snapshot too, so the button is right from
+    // the first frame rather than waiting for the next DCC_LINK.
+    const cJSON* dccLink = cJSON_GetObjectItemCaseSensitive(payload, "dccLink");
+    if (cJSON_IsObject(dccLink)) {
+        handleDccLink(dccLink);
     }
 
     // `locos` is an object keyed by address. This is the layout's belief about
@@ -670,6 +681,199 @@ void OrchestratorClient::handleLocoState(const void* payloadPtr)
     if (callback) {
         callback(state);
     }
+}
+
+void OrchestratorClient::handleDccLink(const void* payloadPtr)
+{
+    const cJSON* payload = static_cast<const cJSON*>(payloadPtr);
+    if (!cJSON_IsObject(payload)) {
+        ESP_LOGW(TAG, "Refusing DCC_LINK with no payload object");
+        return;
+    }
+
+    // `mainPowerOn` is boolean-or-null by contract: null means the command
+    // station has not said. That is UNKNOWN, not off -- reporting it as off
+    // would tell the operator the rails are dead when nobody knows.
+    const cJSON* mainPower = cJSON_GetObjectItemCaseSensitive(payload, "mainPowerOn");
+
+    TrackPower power = TrackPower::UNKNOWN;
+    if (cJSON_IsBool(mainPower)) {
+        power = cJSON_IsTrue(mainPower) ? TrackPower::ON : TrackPower::OFF;
+    } else if (!cJSON_IsNull(mainPower) && mainPower != nullptr) {
+        ESP_LOGW(TAG, "Refusing DCC_LINK: mainPowerOn is neither boolean nor null");
+        return;
+    }
+
+    TrackPowerCallback callback;
+    bool changed = false;
+    if (lockState(pdMS_TO_TICKS(50))) {
+        changed = (m_trackPower != power);
+        m_trackPower = power;
+        callback = m_trackPowerCallback;
+        unlockState();
+    } else {
+        changed = (m_trackPower != power);
+        m_trackPower = power;
+        callback = m_trackPowerCallback;
+    }
+
+    if (changed) {
+        ESP_LOGI(TAG, "Track power: %s",
+                 power == TrackPower::ON ? "on"
+                     : power == TrackPower::OFF ? "off" : "unknown");
+        if (callback) {
+            callback(power);
+        }
+    }
+}
+
+OrchestratorClient::TrackPower OrchestratorClient::getTrackPower() const
+{
+    TrackPower power = TrackPower::UNKNOWN;
+    if (lockState(pdMS_TO_TICKS(50))) {
+        power = m_trackPower;
+        unlockState();
+    }
+    return power;
+}
+
+esp_err_t OrchestratorClient::setTrackPower(bool on)
+{
+    std::string token;
+    std::string host;
+    uint16_t port = DEFAULT_PORT;
+    if (lockState(pdMS_TO_TICKS(200))) {
+        token = m_sessionToken;
+        host = m_host;
+        port = m_port;
+        unlockState();
+    }
+
+    if (token.empty() || host.empty()) {
+        ESP_LOGW(TAG, "Cannot set track power before authenticating");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const std::string layoutId = getLayoutId();
+    if (layoutId.empty()) {
+        ESP_LOGE(TAG, "Cannot set track power: no layout id");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const std::string url = "http://" + host + ":" + std::to_string(port) +
+                            "/api/layouts/" + layoutId + "/dcc-link/power";
+    const std::string cookie = std::string(SESSION_COOKIE_NAME) + "=" + token;
+    const std::string body = on ? "{\"on\":true}" : "{\"on\":false}";
+
+    HttpCapture capture;
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.method = HTTP_METHOD_POST;
+    cfg.timeout_ms = HTTP_TIMEOUT_MS;
+    cfg.event_handler = httpEventHandler;
+    cfg.user_data = &capture;
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) {
+        return ESP_FAIL;
+    }
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "Cookie", cookie.c_str());
+    esp_http_client_set_post_field(client, body.c_str(), static_cast<int>(body.size()));
+
+    esp_err_t err = esp_http_client_perform(client);
+    const int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Track power request failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (status == 403) {
+        ESP_LOGE(TAG, "Track power refused: this credential may not drive");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (status != 200) {
+        ESP_LOGE(TAG, "Track power returned HTTP %d", status);
+        return ESP_FAIL;
+    }
+
+    // The reply body is deliberately ignored. The DCC_LINK event pushed the
+    // moment this lands is what tells us the truth, and it arrives on the
+    // socket like any other state change.
+    ESP_LOGI(TAG, "Track power %s requested", on ? "on" : "off");
+    return ESP_OK;
+}
+
+std::string OrchestratorClient::getLayoutId()
+{
+    if (lockState(pdMS_TO_TICKS(200))) {
+        if (!m_layoutId.empty()) {
+            const std::string cached = m_layoutId;
+            unlockState();
+            return cached;
+        }
+        unlockState();
+    }
+
+    std::string token;
+    std::string host;
+    uint16_t port = DEFAULT_PORT;
+    if (lockState(pdMS_TO_TICKS(200))) {
+        token = m_sessionToken;
+        host = m_host;
+        port = m_port;
+        unlockState();
+    }
+    if (token.empty() || host.empty()) {
+        return std::string();
+    }
+
+    const std::string url = "http://" + host + ":" + std::to_string(port) + "/api/layouts";
+    const std::string cookie = std::string(SESSION_COOKIE_NAME) + "=" + token;
+
+    HttpCapture capture;
+    esp_http_client_config_t cfg = {};
+    cfg.url = url.c_str();
+    cfg.method = HTTP_METHOD_GET;
+    cfg.timeout_ms = HTTP_TIMEOUT_MS;
+    cfg.event_handler = httpEventHandler;
+    cfg.user_data = &capture;
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) {
+        return std::string();
+    }
+    esp_http_client_set_header(client, "Cookie", cookie.c_str());
+    esp_err_t err = esp_http_client_perform(client);
+    const int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK || status != 200) {
+        ESP_LOGE(TAG, "Failed to list layouts (HTTP %d)", status);
+        return std::string();
+    }
+
+    cJSON* layouts = cJSON_Parse(capture.body.c_str());
+    if (!cJSON_IsArray(layouts) || cJSON_GetArraySize(layouts) == 0) {
+        ESP_LOGE(TAG, "Refusing layout list: not a non-empty array");
+        if (layouts) cJSON_Delete(layouts);
+        return std::string();
+    }
+
+    std::string layoutId;
+    const bool haveId = jsonString(cJSON_GetArrayItem(layouts, 0), "id", layoutId);
+    cJSON_Delete(layouts);
+    if (!haveId || layoutId.empty()) {
+        ESP_LOGE(TAG, "Refusing layout list: first entry has no id");
+        return std::string();
+    }
+
+    if (lockState(pdMS_TO_TICKS(200))) {
+        m_layoutId = layoutId;
+        unlockState();
+    }
+    return layoutId;
 }
 
 void OrchestratorClient::handleSystemStatus(const void* payloadPtr)
@@ -834,45 +1038,16 @@ esp_err_t OrchestratorClient::refreshRoster()
     const std::string cookie = std::string(SESSION_COOKIE_NAME) + "=" + token;
 
     // The control plane carries loco state keyed by address but no names, so
-    // the roster is a REST read. It needs a layout id, and the layout list is
-    // where that comes from.
-    HttpCapture layoutsCapture;
-    esp_http_client_config_t layoutsCfg = {};
-    const std::string layoutsUrl = base + "/api/layouts";
-    layoutsCfg.url = layoutsUrl.c_str();
-    layoutsCfg.method = HTTP_METHOD_GET;
-    layoutsCfg.timeout_ms = HTTP_TIMEOUT_MS;
-    layoutsCfg.event_handler = httpEventHandler;
-    layoutsCfg.user_data = &layoutsCapture;
-
-    esp_http_client_handle_t client = esp_http_client_init(&layoutsCfg);
-    if (!client) {
-        return ESP_FAIL;
-    }
-    esp_http_client_set_header(client, "Cookie", cookie.c_str());
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK || status != 200) {
-        ESP_LOGE(TAG, "Failed to list layouts (HTTP %d)", status);
-        return (err != ESP_OK) ? err : ESP_FAIL;
-    }
-
-    cJSON* layouts = cJSON_Parse(layoutsCapture.body.c_str());
-    if (!cJSON_IsArray(layouts) || cJSON_GetArraySize(layouts) == 0) {
-        ESP_LOGE(TAG, "Refusing layout list: not a non-empty array");
-        if (layouts) cJSON_Delete(layouts);
+    // the roster is a REST read. It needs a layout id, which getLayoutId()
+    // fetches once and caches -- the power POST needs the same id.
+    const std::string layoutId = getLayoutId();
+    if (layoutId.empty()) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
-    std::string layoutId;
-    const bool haveId = jsonString(cJSON_GetArrayItem(layouts, 0), "id", layoutId);
-    cJSON_Delete(layouts);
-    if (!haveId || layoutId.empty()) {
-        ESP_LOGE(TAG, "Refusing layout list: first entry has no id");
-        return ESP_ERR_INVALID_RESPONSE;
-    }
+    esp_http_client_handle_t client = nullptr;
+    esp_err_t err = ESP_OK;
+    int status = 0;
 
     HttpCapture locosCapture;
     const std::string locosUrl = base + "/api/layouts/" + layoutId + "/locos";
@@ -1001,6 +1176,16 @@ void OrchestratorClient::setRosterCallback(RosterCallback callback)
     if (lockState(pdMS_TO_TICKS(100))) {
         m_rosterCallback = std::move(callback);
         unlockState();
+    }
+}
+
+void OrchestratorClient::setTrackPowerCallback(TrackPowerCallback callback)
+{
+    if (lockState(pdMS_TO_TICKS(100))) {
+        m_trackPowerCallback = std::move(callback);
+        unlockState();
+    } else {
+        m_trackPowerCallback = std::move(callback);
     }
 }
 

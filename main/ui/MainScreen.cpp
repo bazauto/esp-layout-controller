@@ -128,7 +128,7 @@ void MainScreen::createRightPanel()
     
     // Add track power controls at the top
     m_powerStatusBar = std::make_unique<PowerStatusBar>();
-    m_powerStatusBar->create(m_rightPanel, m_jmriClient);
+    m_powerStatusBar->create(m_rightPanel, m_throttleController);
     
     // Roster selection carousel
     m_rosterCarousel = std::make_unique<RosterCarousel>();
@@ -272,6 +272,12 @@ void MainScreen::updateThrottle(int throttleId)
     // transport the WiThrottle client is never connected, and gating on it left
     // every knob dead.
     bool transportConnected = m_throttleController && m_throttleController->isConnected();
+
+    // Repainted here too, so the status label follows the same link state the
+    // knobs do rather than a separate client's.
+    if (m_powerStatusBar) {
+        m_powerStatusBar->refresh();
+    }
 
     // Hide function panel when entering roster selection
     if (snapshot.state == Throttle::State::SELECTING && m_functionPanel && m_functionPanel->isVisible()) {

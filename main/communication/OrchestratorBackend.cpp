@@ -53,6 +53,7 @@ OrchestratorBackend::~OrchestratorBackend()
     if (m_client) {
         m_client->setLocoStateCallback(nullptr);
         m_client->setConnectionStateCallback(nullptr);
+        m_client->setTrackPowerCallback(nullptr);
     }
     if (m_mutex) {
         vSemaphoreDelete(m_mutex);
@@ -375,6 +376,59 @@ void OrchestratorBackend::setConnectionStateCallback(ConnectionStateCallback cal
         [this](OrchestratorClient::ConnectionState state) {
             if (m_connectionStateCallback) {
                 m_connectionStateCallback(toPortState(state));
+            }
+        });
+}
+
+esp_err_t OrchestratorBackend::setTrackPower(bool on)
+{
+    if (!m_client) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    // Blocking HTTP. The caller is responsible for not being the LVGL task.
+    return m_client->setTrackPower(on);
+}
+
+ThrottleBackend::TrackPower OrchestratorBackend::getTrackPower() const
+{
+    if (!m_client) {
+        return TrackPower::UNKNOWN;
+    }
+    switch (m_client->getTrackPower()) {
+        case OrchestratorClient::TrackPower::ON:  return TrackPower::ON;
+        case OrchestratorClient::TrackPower::OFF: return TrackPower::OFF;
+        default:                                  return TrackPower::UNKNOWN;
+    }
+}
+
+void OrchestratorBackend::setTrackPowerCallback(TrackPowerCallback callback)
+{
+    m_trackPowerCallback = std::move(callback);
+
+    if (!m_client) {
+        return;
+    }
+
+    if (!m_trackPowerCallback) {
+        m_client->setTrackPowerCallback(nullptr);
+        return;
+    }
+
+    m_client->setTrackPowerCallback(
+        [this](OrchestratorClient::TrackPower state) {
+            if (!m_trackPowerCallback) {
+                return;
+            }
+            switch (state) {
+                case OrchestratorClient::TrackPower::ON:
+                    m_trackPowerCallback(TrackPower::ON);
+                    break;
+                case OrchestratorClient::TrackPower::OFF:
+                    m_trackPowerCallback(TrackPower::OFF);
+                    break;
+                default:
+                    m_trackPowerCallback(TrackPower::UNKNOWN);
+                    break;
             }
         });
 }
