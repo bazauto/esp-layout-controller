@@ -171,4 +171,14 @@ public:
 
     virtual void setThrottleStateCallback(ThrottleStateCallback callback) = 0;
     virtual void setFunctionLabelsCallback(FunctionLabelsCallback callback) = 0;
+
+    /**
+     * @brief Notified whenever the link comes up or goes down.
+     *
+     * The UI gates the knobs on this: a knob that still turned while the link
+     * was down would move a model that no longer tracks anything real. It must
+     * therefore come from the *active* backend, not from whichever concrete
+     * client the UI happens to know about.
+     */
+    virtual void setConnectionStateCallback(ConnectionStateCallback callback) = 0;
 };

@@ -39,6 +39,13 @@ ThrottleController::ThrottleController(ThrottleBackend* backend)
                 this->onThrottleStateChanged(update);
             }
         );
+        // Repaint on link up/down. The UI gates the knobs on connection state,
+        // so without this the screen keeps whatever it drew at startup.
+        m_backend->setConnectionStateCallback(
+            [this](ThrottleBackend::ConnectionState) {
+                this->updateUI();
+            }
+        );
         if (m_backend->providesFunctionLabels()) {
             m_backend->setFunctionLabelsCallback(
                 [this](int throttleId, const std::vector<std::string>& labels) {
@@ -365,6 +372,22 @@ Knob* ThrottleController::getKnob(int knobId)
     return nullptr;
 }
 #endif
+
+bool ThrottleController::isConnected() const
+{
+    return m_backend && m_backend->isConnected();
+}
+
+esp_err_t ThrottleController::setFunction(int throttleId, int functionNumber, bool state)
+{
+    if (!m_backend) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (throttleId < 0 || throttleId >= NUM_THROTTLES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return m_backend->setFunction(throttleId, functionNumber, state);
+}
 
 size_t ThrottleController::getRosterSize() const
 {

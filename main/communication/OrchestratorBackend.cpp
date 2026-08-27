@@ -52,6 +52,7 @@ OrchestratorBackend::~OrchestratorBackend()
     // frame arriving mid-teardown lands in a half-destroyed callback.
     if (m_client) {
         m_client->setLocoStateCallback(nullptr);
+        m_client->setConnectionStateCallback(nullptr);
     }
     if (m_mutex) {
         vSemaphoreDelete(m_mutex);
@@ -350,6 +351,32 @@ void OrchestratorBackend::setThrottleStateCallback(ThrottleStateCallback callbac
     } else {
         m_throttleStateCallback = std::move(callback);
     }
+}
+
+void OrchestratorBackend::setConnectionStateCallback(ConnectionStateCallback callback)
+{
+    if (lock(pdMS_TO_TICKS(100))) {
+        m_connectionStateCallback = std::move(callback);
+        unlock();
+    } else {
+        m_connectionStateCallback = std::move(callback);
+    }
+
+    if (!m_client) {
+        return;
+    }
+
+    if (!m_connectionStateCallback) {
+        m_client->setConnectionStateCallback(nullptr);
+        return;
+    }
+
+    m_client->setConnectionStateCallback(
+        [this](OrchestratorClient::ConnectionState state) {
+            if (m_connectionStateCallback) {
+                m_connectionStateCallback(toPortState(state));
+            }
+        });
 }
 
 void OrchestratorBackend::setFunctionLabelsCallback(FunctionLabelsCallback /*callback*/)

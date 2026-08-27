@@ -392,7 +392,13 @@ esp_err_t OrchestratorClient::openSocket(const std::string& host, uint16_t port)
     cfg.ping_interval_sec = 20;
     cfg.disable_auto_reconnect = false;
     cfg.task_stack = 6144;
-    cfg.buffer_size = 4096;
+    // Also sizes the handshake buffer, which is what forced this up: the
+    // orchestrator re-issues the session cookie on every response (sliding
+    // expiry), so the upgrade's 101 carries a Set-Cookie on top of the usual
+    // headers and 4 KB overflowed with "Header size exceeded buffer size".
+    // It cost the first connection attempt outright and only recovered on the
+    // 10 s auto-reconnect.
+    cfg.buffer_size = 8192;
 
     m_client = esp_websocket_client_init(&cfg);
     if (!m_client) {

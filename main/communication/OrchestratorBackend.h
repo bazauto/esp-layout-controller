@@ -57,6 +57,7 @@ public:
 
     void setThrottleStateCallback(ThrottleStateCallback callback) override;
     void setFunctionLabelsCallback(FunctionLabelsCallback callback) override;
+    void setConnectionStateCallback(ConnectionStateCallback callback) override;
 
 private:
     /**
@@ -89,6 +90,7 @@ private:
     std::array<Assignment, MAX_THROTTLES> m_assignments;
 
     ThrottleStateCallback m_throttleStateCallback;
+    ConnectionStateCallback m_connectionStateCallback;
 
     mutable SemaphoreHandle_t m_mutex;
 };

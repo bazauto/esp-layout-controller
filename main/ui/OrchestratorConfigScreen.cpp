@@ -26,6 +26,7 @@ OrchestratorConfigScreen::OrchestratorConfigScreen(OrchestratorClient* client,
     , m_statusValue(nullptr)
     , m_connectButton(nullptr)
     , m_keyboard(nullptr)
+    , m_statusTimer(nullptr)
     , m_connectInProgress(false)
     , m_client(client)
     , m_wifiController(wifiController)
@@ -34,8 +35,24 @@ OrchestratorConfigScreen::OrchestratorConfigScreen(OrchestratorClient* client,
 
 OrchestratorConfigScreen::~OrchestratorConfigScreen()
 {
-    if (m_client) {
-        m_client->setConnectionStateCallback(nullptr);
+    stopStatusTimer();
+}
+
+void OrchestratorConfigScreen::statusTimerCb(lv_timer_t* timer)
+{
+    // Runs on the LVGL task, so no lock is needed here.
+    // LVGL 8.4 has no lv_timer_get_user_data; the field is read directly.
+    auto* self = static_cast<OrchestratorConfigScreen*>(timer->user_data);
+    if (self) {
+        self->updateStatus();
+    }
+}
+
+void OrchestratorConfigScreen::stopStatusTimer()
+{
+    if (m_statusTimer) {
+        lv_timer_del(m_statusTimer);
+        m_statusTimer = nullptr;
     }
 }
 
@@ -72,18 +89,12 @@ lv_obj_t* OrchestratorConfigScreen::create()
 
     loadSettings();
 
-    if (m_client) {
-        m_client->setConnectionStateCallback(
-            [this](OrchestratorClient::ConnectionState) {
-                // Fires on the WebSocket task, so the LVGL lock is required.
-                // 100 ms and skip on contention: another state change will
-                // follow, and a status label is not worth blocking for.
-                if (lvgl_port_lock(100)) {
-                    updateStatus();
-                    lvgl_port_unlock();
-                }
-            });
-    }
+    // Polled on an LVGL timer rather than by registering on the client's
+    // connection callback. That callback is a single slot which the active
+    // ThrottleBackend owns -- the knob gating depends on it -- and taking it
+    // here would silently break knob enablement for the rest of the session.
+    // A twice-a-second poll of a status label costs nothing and steals nothing.
+    m_statusTimer = lv_timer_create(statusTimerCb, 500, this);
 
     updateStatus();
     return m_screen;
@@ -346,11 +357,7 @@ void OrchestratorConfigScreen::connectTask(void* arg)
 
     self->m_connectInProgress = false;
 
-    if (lvgl_port_lock(100)) {
-        self->updateStatus();
-        lvgl_port_unlock();
-    }
-
+    // The status timer picks the result up; nothing to paint from this task.
     vTaskDelete(nullptr);
 }
 
@@ -391,11 +398,8 @@ void OrchestratorConfigScreen::onBackClicked(lv_event_t* e)
 
     self->hideKeyboard();
 
-    // Drop the callback before the widgets go, or a state change arriving
-    // during teardown paints a deleted label.
-    if (self->m_client) {
-        self->m_client->setConnectionStateCallback(nullptr);
-    }
+    // Stop the poll before the widgets go, or it paints a deleted label.
+    self->stopStatusTimer();
 
     show_jmri_config_screen();
 

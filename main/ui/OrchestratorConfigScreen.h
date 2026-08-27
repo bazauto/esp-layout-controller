@@ -55,6 +55,9 @@ private:
     /** Login is a blocking HTTP round trip, so it never runs on the LVGL task (F-05). */
     static void connectTask(void* arg);
 
+    static void statusTimerCb(lv_timer_t* timer);
+    void stopStatusTimer();
+
     lv_obj_t* m_screen;
     lv_obj_t* m_hostInput;
     lv_obj_t* m_portInput;
@@ -63,6 +66,7 @@ private:
     lv_obj_t* m_statusValue;
     lv_obj_t* m_connectButton;
     lv_obj_t* m_keyboard;
+    lv_timer_t* m_statusTimer;
 
     std::atomic<bool> m_connectInProgress;
 
