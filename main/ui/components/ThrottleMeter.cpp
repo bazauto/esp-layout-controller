@@ -264,6 +264,7 @@ void ThrottleMeter::createButtons()
 
     m_functionsButton = lv_btn_create(m_buttonRow);
     lv_obj_set_size(m_functionsButton, LV_PCT(45), btnHeight);
+    lv_obj_set_style_bg_color(m_functionsButton, UiTheme::colour(UiTheme::BUTTON_PRIMARY), 0);
     lv_obj_add_flag(m_functionsButton, LV_OBJ_FLAG_HIDDEN);
     
     lv_obj_t* funcLabel = lv_label_create(m_functionsButton);

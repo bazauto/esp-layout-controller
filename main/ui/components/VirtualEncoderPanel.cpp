@@ -83,6 +83,12 @@ lv_obj_t* VirtualEncoderPanel::create(lv_obj_t* parent,
     // Status label removed - too much clutter
     m_statusLabel = nullptr;
     
+    // Paint the knob buttons from current state before the panel is first
+    // shown. Without this they keep LVGL's default theme colour until the
+    // operator happens to tap one, so the panel opens showing neither knob as
+    // active and both in a colour used nowhere else.
+    updateKnobButtons();
+
     ESP_LOGI(TAG, "Virtual encoder panel created (compact)");
     return m_panel;
 }

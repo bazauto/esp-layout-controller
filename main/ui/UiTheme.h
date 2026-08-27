@@ -17,6 +17,18 @@
  * Colours are named for what they mean, not what they look like. A red button
  * is `BUTTON_DESTRUCTIVE`, so a later change of shade needs one edit here and
  * none anywhere else.
+ *
+ * **Every `lv_btn_create` must be given an explicit background colour.** A
+ * button that sets none does not come out unstyled -- it comes out in LVGL's
+ * own default theme blue, which belongs to no group here and is instantly
+ * obvious next to anything that does. That is not hypothetical: the first pass
+ * at this palette rewrote only the colours that were already explicit, and left
+ * six buttons (both main-screen icons, three Back buttons and Scan) on the
+ * default.
+ *
+ * The same applies to a button coloured from state rather than at creation:
+ * call its update function once during `create()`, or it shows the default
+ * until the state first changes.
  */
 namespace UiTheme {
 

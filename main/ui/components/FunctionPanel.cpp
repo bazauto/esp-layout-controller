@@ -34,6 +34,7 @@ lv_obj_t* FunctionPanel::create(lv_obj_t* parent, lv_event_cb_t closeCallback, v
 
     m_closeButton = lv_btn_create(header);
     lv_obj_set_size(m_closeButton, 40, 30);
+    lv_obj_set_style_bg_color(m_closeButton, UiTheme::colour(UiTheme::BUTTON_NEUTRAL), 0);
     lv_obj_add_event_cb(m_closeButton, closeCallback, LV_EVENT_CLICKED, userData);
 
     lv_obj_t* closeLabel = lv_label_create(m_closeButton);

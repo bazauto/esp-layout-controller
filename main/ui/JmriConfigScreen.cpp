@@ -283,6 +283,7 @@ void JmriConfigScreen::createButtonSection(lv_obj_t* parent)
     lv_obj_t* backLabel = lv_label_create(m_backButton);
     lv_label_set_text(backLabel, "Back");
     lv_obj_center(backLabel);
+    lv_obj_set_style_bg_color(m_backButton, UiTheme::colour(UiTheme::BUTTON_NEUTRAL), 0);
     lv_obj_add_event_cb(m_backButton, onBackButtonClicked, LV_EVENT_CLICKED, this);
 
 }

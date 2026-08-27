@@ -1,4 +1,5 @@
 #include "MainScreen.h"
+#include "UiTheme.h"
 #include "wrappers/wifi_config_wrapper.h"
 #include "wrappers/settings_wrapper.h"
 #include "esp_log.h"
@@ -201,6 +202,7 @@ void MainScreen::createSettingsButton()
     m_settingsButton = lv_btn_create(m_screen);
     lv_obj_set_size(m_settingsButton, 70, 40);
     lv_obj_align(m_settingsButton, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_set_style_bg_color(m_settingsButton, UiTheme::colour(UiTheme::BUTTON_PRIMARY), 0);
     lv_obj_add_event_cb(m_settingsButton, onSettingsButtonClicked, LV_EVENT_CLICKED, this);
     
     // Add WiFi icon
@@ -212,6 +214,7 @@ void MainScreen::createSettingsButton()
     lv_obj_t* jmriButton = lv_btn_create(m_screen);
     lv_obj_set_size(jmriButton, 70, 40);
     lv_obj_align(jmriButton, LV_ALIGN_BOTTOM_RIGHT, -90, -10);
+    lv_obj_set_style_bg_color(jmriButton, UiTheme::colour(UiTheme::BUTTON_PRIMARY), 0);
     lv_obj_add_event_cb(jmriButton, onJmriButtonClicked, LV_EVENT_CLICKED, this);
     
     // Add settings icon
