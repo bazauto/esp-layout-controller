@@ -6,6 +6,36 @@ All UI code uses LVGL (Light and Versatile Graphics Library). The UI layer holds
 
 ---
 
+## Colour: UiTheme
+
+**File:** `main/ui/UiTheme.h`
+
+The one place UI colours are defined. Before it, the app mixed two systems — raw hex like
+`0x00AA00` on the config screens and `lv_palette_main(LV_PALETTE_GREEN)` on the widgets — and
+the two never quite matched.
+
+Buttons are **desaturated**, so a screenful reads as one surface rather than a set of
+warnings. Status *text* stays brighter, because a one-line label has far less area to carry
+its meaning with.
+
+Names say what a colour means, not what it looks like: a red button is `BUTTON_DESTRUCTIVE`,
+so changing the shade is one edit here and none anywhere else.
+
+| Group | Members |
+|-------|---------|
+| Buttons | `BUTTON_PRIMARY`, `BUTTON_POSITIVE`, `BUTTON_DESTRUCTIVE`, `BUTTON_CAUTION`, `BUTTON_NEUTRAL` |
+| State indicators | `STATE_ACTIVE`, `STATE_ALTERNATE`, `STATE_INACTIVE`, `STATE_FAULT` |
+| Text | `TEXT_OK`, `TEXT_WARNING`, `TEXT_ERROR`, `TEXT_MUTED`, `TEXT_LABEL` |
+| Surfaces | `SURFACE_SCREEN`, `SURFACE_PANEL`, `SURFACE_OVERLAY` |
+
+`ThrottleMeter`'s gauge chrome — needle, ticks, the indicator dot — deliberately keeps LVGL's
+own greys. They are structural rather than semantic, and already muted.
+
+**Screen shape is also a convention:** scrolling content above, a fixed button bar pinned to
+the bottom. Every screen follows it.
+
+---
+
 ## Screens
 
 ### MainScreen

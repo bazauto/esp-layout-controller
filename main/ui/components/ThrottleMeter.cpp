@@ -1,4 +1,5 @@
 #include "ThrottleMeter.h"
+#include "../UiTheme.h"
 
 ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     : m_container(nullptr)
@@ -245,7 +246,7 @@ void ThrottleMeter::createKnobIndicators()
     lv_obj_center(directionLabel);
 
     // Default to forward
-    lv_obj_set_style_bg_color(m_directionIndicator, lv_palette_main(LV_PALETTE_GREEN), 0);
+    lv_obj_set_style_bg_color(m_directionIndicator, UiTheme::colour(UiTheme::STATE_ACTIVE), 0);
     
     updateKnobIndicators();
 }
@@ -272,7 +273,7 @@ void ThrottleMeter::createButtons()
     m_releaseButton = lv_btn_create(m_buttonRow);
     lv_obj_set_size(m_releaseButton, LV_PCT(45), btnHeight);
     lv_obj_add_flag(m_releaseButton, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_bg_color(m_releaseButton, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_obj_set_style_bg_color(m_releaseButton, UiTheme::colour(UiTheme::BUTTON_DESTRUCTIVE), 0);
     
     lv_obj_t* releaseLabel = lv_label_create(m_releaseButton);
     lv_label_set_text(releaseLabel, "Release");
@@ -286,15 +287,15 @@ void ThrottleMeter::updateKnobIndicators()
 
         if (!m_knobAvailable[i]) {
             // Unavailable (other knob is active) - gray out
-            lv_obj_set_style_bg_color(m_knobIndicators[i], lv_palette_main(LV_PALETTE_GREY), 0);
+            lv_obj_set_style_bg_color(m_knobIndicators[i], UiTheme::colour(UiTheme::STATE_INACTIVE), 0);
             lv_obj_add_state(m_knobIndicators[i], LV_STATE_DISABLED);
         } else if (m_assignedKnob == i) {
             // Active knob - highlight
-            lv_obj_set_style_bg_color(m_knobIndicators[i], lv_palette_main(LV_PALETTE_GREEN), 0);
+            lv_obj_set_style_bg_color(m_knobIndicators[i], UiTheme::colour(UiTheme::STATE_ACTIVE), 0);
             lv_obj_clear_state(m_knobIndicators[i], LV_STATE_DISABLED);
         } else {
             // Available - normal button color
-            lv_obj_set_style_bg_color(m_knobIndicators[i], lv_palette_main(LV_PALETTE_BLUE), 0);
+            lv_obj_set_style_bg_color(m_knobIndicators[i], UiTheme::colour(UiTheme::STATE_ALTERNATE), 0);
             lv_obj_clear_state(m_knobIndicators[i], LV_STATE_DISABLED);
         }
     }
@@ -383,7 +384,7 @@ void ThrottleMeter::setDirection(bool forward)
 
     lv_obj_set_style_bg_color(
         m_directionIndicator,
-        forward ? lv_palette_main(LV_PALETTE_GREEN) : lv_palette_main(LV_PALETTE_RED),
+        UiTheme::colour(forward ? UiTheme::STATE_ACTIVE : UiTheme::STATE_FAULT),
         0);
 }
 

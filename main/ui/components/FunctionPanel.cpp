@@ -1,4 +1,5 @@
 #include "FunctionPanel.h"
+#include "../UiTheme.h"
 
 FunctionPanel::FunctionPanel()
     : m_panel(nullptr)
@@ -50,7 +51,7 @@ lv_obj_t* FunctionPanel::create(lv_obj_t* parent, lv_event_cb_t closeCallback, v
     lv_obj_set_scrollbar_mode(m_buttonsContainer, LV_SCROLLBAR_MODE_ACTIVE);
     lv_obj_set_style_width(m_buttonsContainer, 12, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(m_buttonsContainer, LV_OPA_60, LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_color(m_buttonsContainer, lv_palette_main(LV_PALETTE_BLUE), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(m_buttonsContainer, UiTheme::colour(UiTheme::BUTTON_PRIMARY), LV_PART_SCROLLBAR);
     lv_obj_set_style_pad_right(m_buttonsContainer, 16, 0);
 
     lv_obj_add_flag(m_panel, LV_OBJ_FLAG_HIDDEN);
@@ -145,8 +146,8 @@ void FunctionPanel::updateButtonStates(const std::vector<Function>& functions)
         lv_obj_t* btn = m_functionButtons[i];
         const auto& func = functions[i];
         lv_obj_set_style_bg_color(btn,
-                                  func.state ? lv_palette_main(LV_PALETTE_GREEN)
-                                             : lv_palette_main(LV_PALETTE_GREY),
+                                  func.state ? UiTheme::colour(UiTheme::STATE_ACTIVE)
+                                             : UiTheme::colour(UiTheme::STATE_INACTIVE),
                                   0);
     }
 }

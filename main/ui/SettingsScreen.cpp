@@ -1,4 +1,5 @@
 #include "SettingsScreen.h"
+#include "UiTheme.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -85,7 +86,7 @@ lv_obj_t* SettingsScreen::create()
     m_shownTransport = TransportSettings::load().transport;
 
     m_screen = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(m_screen, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(m_screen, UiTheme::colour(UiTheme::SURFACE_SCREEN), 0);
 
     const int buttonAreaHeight = BUTTON_HEIGHT + 2 * PADDING;
 
@@ -153,7 +154,7 @@ void SettingsScreen::createTransportSection(lv_obj_t* parent)
     auto addButton = [&](const char* text, lv_event_cb_t handler) {
         lv_obj_t* button = lv_btn_create(row);
         lv_obj_set_size(button, 160, 40);
-        lv_obj_set_style_bg_color(button, lv_color_hex(0x1d4e89), 0);
+        lv_obj_set_style_bg_color(button, UiTheme::colour(UiTheme::BUTTON_PRIMARY), 0);
         lv_obj_add_event_cb(button, handler, LV_EVENT_CLICKED, this);
         lv_obj_t* buttonLabel = lv_label_create(button);
         lv_label_set_text(buttonLabel, text);
@@ -163,9 +164,13 @@ void SettingsScreen::createTransportSection(lv_obj_t* parent)
     addButton("JMRI...", onJmriSettingsClicked);
     addButton("Orchestrator...", onOrchestratorSettingsClicked);
 
+    // Standing advice, not just feedback after the fact: the operator needs to
+    // know a restart is coming *before* they change the dropdown, not after.
+    // onTransportChanged replaces this text once something actually happens.
     m_transportNoteLabel = lv_label_create(parent);
-    lv_label_set_text(m_transportNoteLabel, "");
-    lv_obj_set_style_text_color(m_transportNoteLabel, lv_color_hex(0xfab005), 0);
+    lv_label_set_text(m_transportNoteLabel,
+                      "Changing the transport takes effect after a restart.");
+    lv_obj_set_style_text_color(m_transportNoteLabel, UiTheme::colour(UiTheme::TEXT_MUTED), 0);
     lv_obj_set_width(m_transportNoteLabel, LV_PCT(100));
 }
 
@@ -364,8 +369,9 @@ void SettingsScreen::updateStatus()
             // is actually driving locos over.
             const bool connected = m_throttleController && m_throttleController->isConnected();
             lv_label_set_text(m_statusLinkValue, connected ? "Connected" : "Disconnected");
-            lv_obj_set_style_text_color(m_statusLinkValue,
-                                        lv_color_hex(connected ? 0x40c057 : 0x999999), 0);
+            lv_obj_set_style_text_color(
+                m_statusLinkValue,
+                UiTheme::colour(connected ? UiTheme::TEXT_OK : UiTheme::TEXT_MUTED), 0);
         } else if (m_wiThrottleClient) {
             const char* text = "Disconnected";
             switch (m_wiThrottleClient->getState()) {
@@ -464,6 +470,8 @@ void SettingsScreen::onTransportChanged(lv_event_t* e)
             lv_label_set_text(self->m_transportNoteLabel,
                               "Set the orchestrator host and operator credential first "
                               "(Orchestrator...).");
+            lv_obj_set_style_text_color(self->m_transportNoteLabel,
+                                        UiTheme::colour(UiTheme::TEXT_ERROR), 0);
         }
         return;
     }
@@ -476,6 +484,8 @@ void SettingsScreen::onTransportChanged(lv_event_t* e)
         // under a live ThrottleController would strand locos mid-command.
         lv_label_set_text(self->m_transportNoteLabel,
                           "Saved. Restart the device for the transport change to take effect.");
+        lv_obj_set_style_text_color(self->m_transportNoteLabel,
+                                    UiTheme::colour(UiTheme::TEXT_WARNING), 0);
     }
 }
 

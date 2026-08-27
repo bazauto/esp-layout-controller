@@ -1,4 +1,5 @@
 #include "RosterCarousel.h"
+#include "../UiTheme.h"
 #include "esp_log.h"
 
 static const char* TAG = "RosterCarousel";
@@ -23,19 +24,19 @@ lv_obj_t* RosterCarousel::create(lv_obj_t* parent)
     m_leftArrow = lv_label_create(m_panel);
     lv_label_set_text(m_leftArrow, "<");
     lv_obj_set_style_text_font(m_leftArrow, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(m_leftArrow, lv_palette_main(LV_PALETTE_GREY), 0);
+    lv_obj_set_style_text_color(m_leftArrow, UiTheme::colour(UiTheme::TEXT_MUTED), 0);
     lv_obj_align(m_leftArrow, LV_ALIGN_LEFT_MID, 0, 0);
 
     m_rightArrow = lv_label_create(m_panel);
     lv_label_set_text(m_rightArrow, ">");
     lv_obj_set_style_text_font(m_rightArrow, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(m_rightArrow, lv_palette_main(LV_PALETTE_GREY), 0);
+    lv_obj_set_style_text_color(m_rightArrow, UiTheme::colour(UiTheme::TEXT_MUTED), 0);
     lv_obj_align(m_rightArrow, LV_ALIGN_RIGHT_MID, 0, 0);
 
     m_positionLabel = lv_label_create(m_panel);
     lv_label_set_text(m_positionLabel, "");
     lv_obj_set_style_text_font(m_positionLabel, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(m_positionLabel, lv_palette_main(LV_PALETTE_GREY), 0);
+    lv_obj_set_style_text_color(m_positionLabel, UiTheme::colour(UiTheme::TEXT_MUTED), 0);
     lv_obj_align(m_positionLabel, LV_ALIGN_TOP_MID, 0, 2);
 
     m_currentLabel = lv_label_create(m_panel);
@@ -50,7 +51,7 @@ lv_obj_t* RosterCarousel::create(lv_obj_t* parent)
     m_idLabel = lv_label_create(m_panel);
     lv_label_set_text(m_idLabel, "");
     lv_obj_set_style_text_font(m_idLabel, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(m_idLabel, lv_palette_main(LV_PALETTE_GREY), 0);
+    lv_obj_set_style_text_color(m_idLabel, UiTheme::colour(UiTheme::TEXT_MUTED), 0);
     lv_obj_set_style_text_align(m_idLabel, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(m_idLabel, LV_ALIGN_BOTTOM_MID, 0, -4);
 
