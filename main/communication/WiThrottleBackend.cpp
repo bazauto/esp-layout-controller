@@ -25,12 +25,69 @@ ThrottleBackend::ConnectionState toPortState(WiThrottleClient::ConnectionState s
 
 }  // namespace
 
-WiThrottleBackend::WiThrottleBackend(WiThrottleClient* client)
+WiThrottleBackend::WiThrottleBackend(WiThrottleClient* client, JmriJsonClient* jsonClient)
     : m_client(client)
+    , m_jsonClient(jsonClient)
 {
     if (!m_client) {
         ESP_LOGE(TAG, "Constructed with a null WiThrottleClient; every command will be refused");
     }
+    if (!m_jsonClient) {
+        ESP_LOGW(TAG, "No JSON client; track power will be unavailable");
+    }
+}
+
+esp_err_t WiThrottleBackend::setTrackPower(bool on)
+{
+    if (!m_jsonClient) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return m_jsonClient->setPower(on);
+}
+
+ThrottleBackend::TrackPower WiThrottleBackend::getTrackPower() const
+{
+    if (!m_jsonClient) {
+        return TrackPower::UNKNOWN;
+    }
+
+    switch (m_jsonClient->getPower()) {
+        case JmriJsonClient::PowerState::ON:  return TrackPower::ON;
+        case JmriJsonClient::PowerState::OFF: return TrackPower::OFF;
+        default:                              return TrackPower::UNKNOWN;
+    }
+}
+
+void WiThrottleBackend::setTrackPowerCallback(TrackPowerCallback callback)
+{
+    m_trackPowerCallback = std::move(callback);
+
+    if (!m_jsonClient) {
+        return;
+    }
+
+    if (!m_trackPowerCallback) {
+        m_jsonClient->setPowerStateCallback(nullptr);
+        return;
+    }
+
+    m_jsonClient->setPowerStateCallback(
+        [this](const std::string& /*powerName*/, JmriJsonClient::PowerState state) {
+            if (!m_trackPowerCallback) {
+                return;
+            }
+            switch (state) {
+                case JmriJsonClient::PowerState::ON:
+                    m_trackPowerCallback(TrackPower::ON);
+                    break;
+                case JmriJsonClient::PowerState::OFF:
+                    m_trackPowerCallback(TrackPower::OFF);
+                    break;
+                default:
+                    m_trackPowerCallback(TrackPower::UNKNOWN);
+                    break;
+            }
+        });
 }
 
 bool WiThrottleBackend::isConnected() const

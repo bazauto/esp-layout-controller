@@ -41,3 +41,23 @@ CONFIG_LV_USE_IMGFONT=y
 # CONFIG_LV_USE_DEMO_BENCHMARK is not set
 # CONFIG_LV_USE_DEMO_STRESS is not set
 # CONFIG_LV_USE_DEMO_MUSIC is not set
+
+# WebSocket handshake buffer. This sizes the buffer transport_ws builds the
+# HTTP Upgrade exchange in -- NOT esp_websocket_client_config_t::buffer_size,
+# which is only the client's frame buffer and has no bearing on the handshake.
+#
+# The orchestrator re-issues its session cookie on every response (sliding
+# expiry), so the /ws upgrade's 101 carries a Set-Cookie on top of the usual
+# headers. At the 1024 default that overflows and every connection attempt dies
+# with "transport_ws: Header size exceeded buffer size" before the socket opens.
+#
+# Sized for the 101 response PLUS however much of the first frame arrives in the
+# same TCP read. transport_ws exits its read loop once it finds the header
+# terminator, but then still fails if the buffer filled -- and the orchestrator
+# pushes a whole-layout STATE_SNAPSHOT the instant the socket opens, so the two
+# regularly land together. That is why the failure was intermittent: it depends
+# on packet timing, not on the headers alone.
+#
+# The value was previously only in the generated sdkconfig, so a clean checkout
+# and CI both built with 1024 and could never have connected to the orchestrator.
+CONFIG_WS_BUFFER_SIZE=16384

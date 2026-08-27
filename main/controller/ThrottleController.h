@@ -148,6 +148,25 @@ public:
      */
     esp_err_t setFunction(int throttleId, int functionNumber, bool state);
 
+    /** Whether the active transport offers a track-power control at all. */
+    bool supportsTrackPower() const;
+
+    ThrottleBackend::TrackPower getTrackPower() const;
+
+    /**
+     * @brief Request a track-power change.
+     *
+     * Returns immediately: the orchestrator's power command is a blocking HTTP
+     * round trip, so the write happens on a short-lived task. The button must
+     * never wait for it (F-05). The real state arrives through the power
+     * callback, so the UI is driven by what the layout says, not by what we
+     * asked for.
+     */
+    void requestTrackPower(bool on);
+
+    /** Called on any track-power change. Registered by the UI. */
+    void setTrackPowerCallback(void (*callback)(void*, ThrottleBackend::TrackPower), void* userData);
+
     /**
      * @brief Get current roster size
      */
@@ -193,6 +212,12 @@ private:
 
     void onFunctionLabelsReceived(int throttleId, const std::vector<std::string>& labels);
     
+    struct TrackPowerRequest {
+        ThrottleController* controller;
+        bool on;
+    };
+    static void trackPowerTaskFunc(void* arg);
+
     // Polling for state synchronization
     void pollThrottleStates();
     static void pollingTaskFunc(void* arg);
@@ -207,6 +232,9 @@ private:
     
     void (*m_uiUpdateCallback)(void*);
     void* m_uiUpdateUserData;
+
+    void (*m_trackPowerCallback)(void*, ThrottleBackend::TrackPower);
+    void* m_trackPowerUserData;
     
     TaskHandle_t m_pollingTask;
     bool m_pollingRunning;

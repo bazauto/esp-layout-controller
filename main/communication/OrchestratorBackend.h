@@ -59,6 +59,11 @@ public:
     void setFunctionLabelsCallback(FunctionLabelsCallback callback) override;
     void setConnectionStateCallback(ConnectionStateCallback callback) override;
 
+    bool supportsTrackPower() const override { return m_client != nullptr; }
+    esp_err_t setTrackPower(bool on) override;
+    TrackPower getTrackPower() const override;
+    void setTrackPowerCallback(TrackPowerCallback callback) override;
+
 private:
     /**
      * @brief What this device currently has on each throttle.
@@ -91,6 +96,7 @@ private:
 
     ThrottleStateCallback m_throttleStateCallback;
     ConnectionStateCallback m_connectionStateCallback;
+    TrackPowerCallback m_trackPowerCallback;
 
     mutable SemaphoreHandle_t m_mutex;
 };

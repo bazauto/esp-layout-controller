@@ -1,5 +1,6 @@
 #pragma once
 
+#include "JmriJsonClient.h"
 #include "ThrottleBackend.h"
 #include "WiThrottleClient.h"
 
@@ -15,7 +16,16 @@
  */
 class WiThrottleBackend : public ThrottleBackend {
 public:
-    explicit WiThrottleBackend(WiThrottleClient* client);
+    /**
+     * @param client WiThrottle client. Not owned; must outlive this adapter.
+     * @param jsonClient JMRI JSON client, used **only** for track power.
+     *        Under JMRI, power goes over the JSON API and not the WiThrottle
+     *        `PPA` command -- that is what the power button has always done,
+     *        and routing it through WiThrottle here would quietly change
+     *        behaviour for every existing JMRI user. May be null, in which
+     *        case supportsTrackPower() is false.
+     */
+    WiThrottleBackend(WiThrottleClient* client, JmriJsonClient* jsonClient);
     ~WiThrottleBackend() override = default;
 
     WiThrottleBackend(const WiThrottleBackend&) = delete;
@@ -45,6 +55,11 @@ public:
     void setFunctionLabelsCallback(FunctionLabelsCallback callback) override;
     void setConnectionStateCallback(ConnectionStateCallback callback) override;
 
+    bool supportsTrackPower() const override { return m_jsonClient != nullptr; }
+    esp_err_t setTrackPower(bool on) override;
+    TrackPower getTrackPower() const override;
+    void setTrackPowerCallback(TrackPowerCallback callback) override;
+
 private:
     /** Throttle index to WiThrottle's character id, or 0 when out of range.
      * Callers check validity with isValidThrottle first. */
@@ -54,10 +69,12 @@ private:
     }
 
     WiThrottleClient* m_client;
+    JmriJsonClient* m_jsonClient;
 
     // Held so the lambdas registered on the client stay valid, and so a second
     // setThrottleStateCallback replaces the first rather than stacking.
     ThrottleStateCallback m_throttleStateCallback;
     FunctionLabelsCallback m_functionLabelsCallback;
     ConnectionStateCallback m_connectionStateCallback;
+    TrackPowerCallback m_trackPowerCallback;
 };

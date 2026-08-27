@@ -95,7 +95,10 @@ void AppController::initialise()
             m_throttleBackend = std::make_unique<OrchestratorBackend>(m_orchestratorClient.get());
             startOrchestratorConnectTask();
         } else {
-            m_throttleBackend = std::make_unique<WiThrottleBackend>(m_wiThrottleClient.get());
+            // The JSON client comes in for track power only: under JMRI that
+            // has always gone over the JSON API rather than WiThrottle's PPA.
+            m_throttleBackend = std::make_unique<WiThrottleBackend>(m_wiThrottleClient.get(),
+                                                                    m_jmriClient.get());
         }
 
         ESP_LOGI(TAG, "Throttle transport: %s",

@@ -18,6 +18,8 @@ ThrottleController::ThrottleController(ThrottleBackend* backend)
     , m_stateMutex(nullptr)
     , m_uiUpdateCallback(nullptr)
     , m_uiUpdateUserData(nullptr)
+    , m_trackPowerCallback(nullptr)
+    , m_trackPowerUserData(nullptr)
     , m_pollingTask(nullptr)
     , m_pollingRunning(false)
     , m_cachedSpeedSteps(4)
@@ -44,6 +46,13 @@ ThrottleController::ThrottleController(ThrottleBackend* backend)
         m_backend->setConnectionStateCallback(
             [this](ThrottleBackend::ConnectionState) {
                 this->updateUI();
+            }
+        );
+        m_backend->setTrackPowerCallback(
+            [this](ThrottleBackend::TrackPower state) {
+                if (m_trackPowerCallback) {
+                    m_trackPowerCallback(m_trackPowerUserData, state);
+                }
             }
         );
         if (m_backend->providesFunctionLabels()) {
@@ -372,6 +381,53 @@ Knob* ThrottleController::getKnob(int knobId)
     return nullptr;
 }
 #endif
+
+bool ThrottleController::supportsTrackPower() const
+{
+    return m_backend && m_backend->supportsTrackPower();
+}
+
+ThrottleBackend::TrackPower ThrottleController::getTrackPower() const
+{
+    if (!m_backend) {
+        return ThrottleBackend::TrackPower::UNKNOWN;
+    }
+    return m_backend->getTrackPower();
+}
+
+void ThrottleController::setTrackPowerCallback(
+    void (*callback)(void*, ThrottleBackend::TrackPower), void* userData)
+{
+    m_trackPowerCallback = callback;
+    m_trackPowerUserData = userData;
+}
+
+void ThrottleController::trackPowerTaskFunc(void* arg)
+{
+    auto* request = static_cast<TrackPowerRequest*>(arg);
+    if (request && request->controller && request->controller->m_backend) {
+        request->controller->m_backend->setTrackPower(request->on);
+    }
+    delete request;
+    vTaskDelete(nullptr);
+}
+
+void ThrottleController::requestTrackPower(bool on)
+{
+    if (!m_backend || !m_backend->supportsTrackPower()) {
+        ESP_LOGW(TAG, "Track power not supported by the active transport");
+        return;
+    }
+
+    // On its own task: the orchestrator's power command is a blocking HTTP
+    // round trip, and this is called straight from an LVGL button handler.
+    // 4 KB covers the HTTP client.
+    auto* request = new TrackPowerRequest{this, on};
+    if (xTaskCreate(trackPowerTaskFunc, "track_power", 4096, request, 5, nullptr) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create track power task");
+        delete request;
+    }
+}
 
 bool ThrottleController::isConnected() const
 {

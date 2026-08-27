@@ -1,4 +1,8 @@
 #include "PowerStatusBar.h"
+
+#include <string>
+
+#include "controller/ThrottleController.h"
 #include "esp_log.h"
 #include "lvgl_port.h"
 
@@ -13,21 +17,20 @@ PowerStatusBar::PowerStatusBar()
     : m_container(nullptr)
     , m_trackPowerButton(nullptr)
     , m_connectionStatusLabel(nullptr)
-    , m_jmriClient(nullptr)
+    , m_throttleController(nullptr)
 {
 }
 
 PowerStatusBar::~PowerStatusBar()
 {
-    if (m_jmriClient) {
-        m_jmriClient->setPowerStateCallback(nullptr);
-        m_jmriClient->setConnectionStateCallback(nullptr);
+    if (m_throttleController) {
+        m_throttleController->setTrackPowerCallback(nullptr, nullptr);
     }
 }
 
-lv_obj_t* PowerStatusBar::create(lv_obj_t* parent, JmriJsonClient* jmriClient)
+lv_obj_t* PowerStatusBar::create(lv_obj_t* parent, ThrottleController* throttleController)
 {
-    m_jmriClient = jmriClient;
+    m_throttleController = throttleController;
 
     m_container = lv_obj_create(parent);
     lv_obj_set_size(m_container, LV_PCT(90), 50);
@@ -49,46 +52,72 @@ lv_obj_t* PowerStatusBar::create(lv_obj_t* parent, JmriJsonClient* jmriClient)
     lv_obj_set_style_text_color(m_connectionStatusLabel, lv_color_hex(0xFF0000), 0);
     lv_obj_center(m_connectionStatusLabel);
 
-    if (m_jmriClient) {
-        updateTrackPowerButton(m_jmriClient->getPower());
-        updateConnectionStatus(m_jmriClient->getState());
+    if (m_throttleController) {
+        // A transport with no power control gets no button at all, rather than
+        // a dead one the operator can press and wonder about.
+        if (!m_throttleController->supportsTrackPower()) {
+            lv_obj_add_flag(m_trackPowerButton, LV_OBJ_FLAG_HIDDEN);
+        }
 
-        m_jmriClient->setPowerStateCallback([this](const std::string& powerName, JmriJsonClient::PowerState state) {
-            (void)powerName;
-            if (lvgl_port_lock(200)) {
-                updateTrackPowerButton(state);
-                lvgl_port_unlock();
-            }
-        });
-
-        m_jmriClient->setConnectionStateCallback([this](JmriJsonClient::ConnectionState state) {
-            if (lvgl_port_lock(200)) {
-                updateConnectionStatus(state);
-                lvgl_port_unlock();
-            }
-        });
+        m_throttleController->setTrackPowerCallback(onTrackPowerChanged, this);
+        refresh();
     }
 
     ESP_LOGI(TAG, "Power/status bar created");
     return m_container;
 }
 
+void PowerStatusBar::refresh()
+{
+    if (!m_throttleController) {
+        return;
+    }
+    updateTrackPowerButton(m_throttleController->getTrackPower());
+    updateConnectionStatus(m_throttleController->isConnected());
+}
+
+void PowerStatusBar::onTrackPowerChanged(void* userData, ThrottleBackend::TrackPower state)
+{
+    auto* bar = static_cast<PowerStatusBar*>(userData);
+    if (!bar) {
+        return;
+    }
+    // Arrives on a transport task, so the LVGL lock is required. 200 ms and
+    // skip on contention -- a missed repaint is corrected by the next event.
+    if (lvgl_port_lock(200)) {
+        bar->updateTrackPowerButton(state);
+        lvgl_port_unlock();
+    }
+}
+
 void PowerStatusBar::onTrackPowerClicked(lv_event_t* e)
 {
     auto* bar = static_cast<PowerStatusBar*>(lv_event_get_user_data(e));
-    if (!bar || !bar->m_jmriClient || !bar->m_jmriClient->isConnected()) {
-        ESP_LOGW(TAG, "Not connected to JMRI server");
+    if (!bar || !bar->m_throttleController) {
         return;
     }
 
-    auto currentState = bar->m_jmriClient->getPower();
-    bool newState = (currentState != JmriJsonClient::PowerState::ON);
+    if (!bar->m_throttleController->isConnected()) {
+        ESP_LOGW(TAG, "Not connected; ignoring track power press");
+        return;
+    }
+
+    // UNKNOWN turns power on: the useful thing to do when nobody has said what
+    // the rails are doing is to energise them, and the operator can press
+    // again to turn it off once the state is known.
+    const ThrottleBackend::TrackPower current = bar->m_throttleController->getTrackPower();
+    const bool newState = (current != ThrottleBackend::TrackPower::ON);
 
     ESP_LOGI(TAG, "Toggling track power: %s", newState ? "ON" : "OFF");
-    bar->m_jmriClient->setPower(newState);
+
+    // Returns immediately; the write happens on its own task because the
+    // orchestrator's power command is a blocking HTTP round trip and this is
+    // an LVGL event handler (F-05). The button repaints when the layout says
+    // it changed, not when we asked.
+    bar->m_throttleController->requestTrackPower(newState);
 }
 
-void PowerStatusBar::updateTrackPowerButton(JmriJsonClient::PowerState state)
+void PowerStatusBar::updateTrackPowerButton(ThrottleBackend::TrackPower state)
 {
     if (!m_trackPowerButton) return;
 
@@ -99,17 +128,19 @@ void PowerStatusBar::updateTrackPowerButton(JmriJsonClient::PowerState state)
     const char* stateText;
 
     switch (state) {
-        case JmriJsonClient::PowerState::ON:
+        case ThrottleBackend::TrackPower::ON:
             color = 0x00AA00;
-            stateText = "Power";
+            stateText = "Power On";
             break;
-        case JmriJsonClient::PowerState::OFF:
+        case ThrottleBackend::TrackPower::OFF:
             color = 0xAA0000;
-            stateText = "Power";
+            stateText = "Power Off";
             break;
         default:
+            // Not "off": nothing has told us yet, and showing it as off would
+            // claim the rails are dead when nobody knows.
             color = 0x888888;
-            stateText = "Power";
+            stateText = "Power ?";
             break;
     }
 
@@ -117,39 +148,15 @@ void PowerStatusBar::updateTrackPowerButton(JmriJsonClient::PowerState state)
     lv_label_set_text(label, stateText);
 }
 
-void PowerStatusBar::updateConnectionStatus(JmriJsonClient::ConnectionState state)
+void PowerStatusBar::updateConnectionStatus(bool connected)
 {
     if (!m_connectionStatusLabel) return;
 
-    const char* icon;
-    const char* text;
-    uint32_t color;
+    const char* icon = connected ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE;
+    const char* text = connected ? " Connected" : " Disconnected";
+    const uint32_t color = connected ? 0x00AA00 : 0x888888;
 
-    switch (state) {
-        case JmriJsonClient::ConnectionState::CONNECTED:
-            icon = LV_SYMBOL_OK;
-            text = " Connected";
-            color = 0x00AA00;
-            break;
-        case JmriJsonClient::ConnectionState::CONNECTING:
-            icon = LV_SYMBOL_REFRESH;
-            text = " Connecting";
-            color = 0xFFAA00;
-            break;
-        case JmriJsonClient::ConnectionState::FAILED:
-            icon = LV_SYMBOL_WARNING;
-            text = " Failed";
-            color = 0xFF0000;
-            break;
-        case JmriJsonClient::ConnectionState::DISCONNECTED:
-        default:
-            icon = LV_SYMBOL_CLOSE;
-            text = " Disconnected";
-            color = 0x888888;
-            break;
-    }
-
-    std::string statusText = std::string(icon) + text;
+    const std::string statusText = std::string(icon) + text;
     lv_label_set_text(m_connectionStatusLabel, statusText.c_str());
     lv_obj_set_style_text_color(m_connectionStatusLabel, lv_color_hex(color), 0);
 }

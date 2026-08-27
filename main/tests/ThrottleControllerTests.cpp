@@ -102,6 +102,24 @@ namespace {
             connectionStateCallback = std::move(callback);
         }
 
+        bool supportsTrackPower() const override { return trackPowerSupported; }
+        esp_err_t setTrackPower(bool on) override {
+            trackPowerWrites.push_back(on);
+            return ESP_OK;
+        }
+        TrackPower getTrackPower() const override { return trackPower; }
+        void setTrackPowerCallback(TrackPowerCallback callback) override {
+            trackPowerCallback = std::move(callback);
+        }
+
+        /** Reports a power change, as the layout would. */
+        void emitTrackPower(TrackPower state) {
+            trackPower = state;
+            if (trackPowerCallback) {
+                trackPowerCallback(state);
+            }
+        }
+
         /** Drives a link up/down event, as a transport would. */
         void emitConnectionState(ConnectionState state) {
             connected = (state == ConnectionState::CONNECTED);
@@ -121,6 +139,11 @@ namespace {
         ThrottleStateCallback throttleStateCallback;
         FunctionLabelsCallback functionLabelsCallback;
         ConnectionStateCallback connectionStateCallback;
+
+        bool trackPowerSupported = true;
+        TrackPower trackPower = TrackPower::UNKNOWN;
+        std::vector<bool> trackPowerWrites;
+        TrackPowerCallback trackPowerCallback;
     };
 
     void uiUpdateCallback(void* userData)
@@ -461,6 +484,64 @@ static void test_controller_pairs_speed_and_direction_on_flip(void)
     TEST_ASSERT_FALSE(backend.pairedCommands[0].boolArg);
 }
 
+namespace {
+    struct PowerCapture {
+        int calls = 0;
+        ThrottleBackend::TrackPower last = ThrottleBackend::TrackPower::UNKNOWN;
+    };
+
+    void powerCallback(void* userData, ThrottleBackend::TrackPower state)
+    {
+        auto* capture = static_cast<PowerCapture*>(userData);
+        if (capture) {
+            capture->calls++;
+            capture->last = state;
+        }
+    }
+}
+
+static void test_controller_reports_track_power_from_backend(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+
+    // The power bar read JmriJsonClient directly, so under the orchestrator
+    // transport the button did nothing and the label lied.
+    TEST_ASSERT_TRUE(controller.supportsTrackPower());
+    TEST_ASSERT_TRUE(controller.getTrackPower() == ThrottleBackend::TrackPower::UNKNOWN);
+
+    backend.trackPower = ThrottleBackend::TrackPower::ON;
+    TEST_ASSERT_TRUE(controller.getTrackPower() == ThrottleBackend::TrackPower::ON);
+}
+
+static void test_controller_forwards_track_power_changes(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+
+    PowerCapture capture;
+    controller.setTrackPowerCallback(powerCallback, &capture);
+
+    backend.emitTrackPower(ThrottleBackend::TrackPower::ON);
+
+    TEST_ASSERT_EQUAL_INT(1, capture.calls);
+    TEST_ASSERT_TRUE(capture.last == ThrottleBackend::TrackPower::ON);
+}
+
+static void test_controller_hides_track_power_when_unsupported(void)
+{
+    FakeThrottleBackend backend;
+    backend.trackPowerSupported = false;
+    ThrottleController controller(&backend);
+
+    TEST_ASSERT_FALSE(controller.supportsTrackPower());
+
+    // Refused rather than sent: a transport with no power control must not
+    // have one faked on its behalf.
+    controller.requestTrackPower(true);
+    TEST_ASSERT_EQUAL_INT(0, (int)backend.trackPowerWrites.size());
+}
+
 extern "C" void register_controller_tests(void)
 {
     RUN_TEST(test_controller_assign_knob_to_unallocated);
@@ -479,4 +560,7 @@ extern "C" void register_controller_tests(void)
     RUN_TEST(test_controller_repaints_on_connection_change);
     RUN_TEST(test_controller_function_reaches_backend);
     RUN_TEST(test_controller_pairs_speed_and_direction_on_flip);
+    RUN_TEST(test_controller_reports_track_power_from_backend);
+    RUN_TEST(test_controller_forwards_track_power_changes);
+    RUN_TEST(test_controller_hides_track_power_when_unsupported);
 }
