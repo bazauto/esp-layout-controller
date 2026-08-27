@@ -49,9 +49,9 @@ All UI code uses LVGL (Light and Versatile Graphics Library). The UI layer holds
 | `onReleaseButtonClicked` | "Release" button | `TC::onThrottleRelease()` |
 | `onVirtualEncoderRotation` | Virtual encoder ±buttons | `TC::onKnobRotation()` |
 | `onVirtualEncoderPress` | Virtual encoder press | `TC::onKnobPress()` |
-| `onFunctionButtonClicked` | Function toggle | `WT::setFunction()` |
+| `onFunctionButtonClicked` | Function toggle | `TC::setFunction()` — through the port, not a client |
 | `onSettingsButtonClicked` | Settings gear icon | Navigate to WiFiConfigScreen |
-| `onJmriButtonClicked` | JMRI icon | Navigate to JmriConfigScreen |
+| `onJmriButtonClicked` | Settings icon | Navigate to SettingsScreen |
 
 **UI Update Callback:** Registered with `ThrottleController::setUIUpdateCallback()`. Acquires `lvgl_port_lock(200)` before calling `updateAllThrottles()`.
 
@@ -80,30 +80,47 @@ All UI code uses LVGL (Light and Versatile Graphics Library). The UI layer holds
 
 **File:** `main/ui/JmriConfigScreen.cpp/h`
 
-**Purpose:** JMRI server connection settings and system status display.
-
-**Constructor:** `JmriConfigScreen(JmriJsonClient&, WiThrottleClient&, WiFiController*, RotaryEncoderHal*)`
+**Purpose:** JMRI server connection settings. **Only JMRI** — the transport choice, speed
+steps and system status moved to `SettingsScreen` when the second transport landed, because a
+screen titled "JMRI Server Configuration" had no business owning any of them.
 
 **Config fields:**
 - Server IP address
 - WiThrottle port
 - Power manager name
-- Speed steps per click (1–20)
 
-**System status panel:**
-- Software version, hardware revision
-- WiFi / WiThrottle / JSON connection status indicators
-- Encoder 1/2 presence indicators
+**JMRI connections panel:** WiThrottle and JMRI JSON status. Device-wide status (software,
+hardware, WiFi, encoders) is on the settings screen, not duplicated here.
 
 **Connect flow:** Connects WiThrottle first; when the server sends back the `PW` (web port) message, auto-connects the JSON client using the discovered port.
 
-**Navigation:** Back button → `show_main_screen()`
+**Navigation:** Back button → `show_settings_screen()`
 
-**Transport selection:** a dropdown choosing WiThrottle or the layout orchestrator, plus an
-"Orchestrator Settings" button. The dropdown **refuses** to select the orchestrator until its
-host and credential are set, rather than saving a choice that would boot into a dead
-transport with every knob disabled. Changing it says plainly that a restart is needed —
-`AppController` picks the backend once, during `initialise()`.
+---
+
+### SettingsScreen
+
+**File:** `main/ui/SettingsScreen.cpp/h`
+
+**Purpose:** Device settings, and the front door to each transport's own config. This is what
+the main screen's settings button opens.
+
+It exists because the JMRI config screen had grown into two unrelated things: it was titled
+"JMRI Server Configuration" while owning the **global** choice of transport, and its System
+Status section knew nothing about the orchestrator.
+
+Holds the transport dropdown, buttons through to both transport config screens, speed steps
+per click (a property of the encoder, not of either transport), and System Status.
+
+**The status rows follow the selected transport**, so the screen never reports on a link the
+device is not bringing up: `Control plane` under the orchestrator, `WiThrottle` + `JMRI JSON`
+under JMRI. Software, hardware, WiFi and the encoders are shown either way.
+
+Both config screens stay reachable whichever transport is selected, so one can be set up
+before being switched to -- the dropdown refuses an unconfigured orchestrator.
+
+**Navigation:** Back -> `show_main_screen()`; the two buttons -> the config screens, which
+return here.
 
 ---
 
@@ -122,7 +139,7 @@ risk.
 own task** (`orch_ui_conn`). The login is a blocking HTTP round trip; running it on the LVGL
 task would freeze every throttle at once (F-05).
 
-**Navigation:** Back button → `show_jmri_config_screen()`
+**Navigation:** Back button → `show_settings_screen()`
 
 ---
 
@@ -156,7 +173,7 @@ did nothing and the label read "Disconnected" while the layout was in fact conne
 **Visual elements:**
 - Needle indicator (speed)
 - Colour-coded arc zones
-- L/R knob indicator buttons (disabled while WiThrottle is disconnected)
+- L/R knob indicator buttons (disabled while the **active transport** is disconnected)
 - Direction indicator (F/R)
 - Locomotive name and address labels
 - "Functions" and "Release" buttons
@@ -233,5 +250,6 @@ C-linkage (`extern "C"`) functions that bridge `main.c` and inter-screen navigat
 |------|-----------|---------|
 | `main_screen_wrapper.cpp/h` | `init_app_controller()`, `show_main_screen()` | App init + main screen |
 | `wifi_config_wrapper.cpp/h` | `show_wifi_config_screen()`, `close_wifi_config_screen()`, `is_wifi_connected()` | WiFi settings |
+| `settings_wrapper.cpp/h` | `show_settings_screen()` | Device settings (the main screen's settings button) |
 | `jmri_config_wrapper.cpp/h` | `show_jmri_config_screen()`, `jmri_auto_connect()` | JMRI settings |
 | `orchestrator_config_wrapper.cpp/h` | `show_orchestrator_config_screen()` | Orchestrator settings |

@@ -90,7 +90,9 @@ main/
 │                   WiFiManager, WiThrottleClient (TCP), JmriJsonClient (WebSocket),
 │                   OrchestratorClient (WebSocket control plane)
 ├── controller/     AppController, ThrottleController, WiFiController, JmriConnectionController
-└── ui/             LVGL screens and components
+└── ui/             SettingsScreen (transport choice, device settings, status),
+                    JmriConfigScreen and OrchestratorConfigScreen (one per
+                    transport), MainScreen, components
 ```
 
 Dependency direction is one way: `ui` → `controller` → `communication` / `model`. A model

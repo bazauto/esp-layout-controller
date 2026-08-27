@@ -1,6 +1,6 @@
 #include "MainScreen.h"
 #include "wrappers/wifi_config_wrapper.h"
-#include "wrappers/jmri_config_wrapper.h"
+#include "wrappers/settings_wrapper.h"
 #include "esp_log.h"
 #include "lvgl_port.h"
 #include <vector>
@@ -224,7 +224,7 @@ void MainScreen::createSettingsButton()
 void MainScreen::onJmriButtonClicked(lv_event_t* e)
 {
     ESP_LOGI(TAG, "JMRI button clicked");
-    show_jmri_config_screen();
+    show_settings_screen();
 }
 
 void MainScreen::onSettingsButtonClicked(lv_event_t* e)

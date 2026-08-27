@@ -46,6 +46,7 @@ configured).
 | `m_throttleController` | `unique_ptr<ThrottleController>` | Throttle/knob state |
 | `m_encoderHal` | `unique_ptr<RotaryEncoderHal>` | Encoder hardware |
 | `m_mainScreen` | `unique_ptr<MainScreen>` | Current main screen instance |
+| `m_settingsScreen` | `unique_ptr<SettingsScreen>` | Device settings. Rebuilt on each open, because which status rows it shows depends on the selected transport |
 
 ### Key Methods
 
