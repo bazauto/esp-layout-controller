@@ -260,6 +260,7 @@ void SettingsScreen::createButtonSection(lv_obj_t* parent)
 
     lv_obj_t* backButton = lv_btn_create(container);
     lv_obj_set_size(backButton, 200, BUTTON_HEIGHT);
+    lv_obj_set_style_bg_color(backButton, UiTheme::colour(UiTheme::BUTTON_NEUTRAL), 0);
     lv_obj_add_event_cb(backButton, onBackClicked, LV_EVENT_CLICKED, this);
     lv_obj_t* label = lv_label_create(backButton);
     lv_label_set_text(label, "Back");

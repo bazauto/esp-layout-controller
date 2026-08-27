@@ -191,6 +191,7 @@ void WiFiConfigScreen::createButtonSection(lv_obj_t* parent)
     lv_label_set_text(scanLabel, "Scan");
     lv_obj_center(scanLabel);
     lv_obj_add_event_cb(m_scanButton, onScanButtonClicked, LV_EVENT_CLICKED, this);
+    lv_obj_set_style_bg_color(m_scanButton, UiTheme::colour(UiTheme::BUTTON_PRIMARY), 0);
     
     // Connect button (green)
     m_connectButton = lv_btn_create(buttonContainer);
@@ -226,6 +227,7 @@ void WiFiConfigScreen::createButtonSection(lv_obj_t* parent)
     lv_label_set_text(backLabel, "Back");
     lv_obj_center(backLabel);
     lv_obj_add_event_cb(m_backButton, onBackButtonClicked, LV_EVENT_CLICKED, this);
+    lv_obj_set_style_bg_color(m_backButton, UiTheme::colour(UiTheme::BUTTON_NEUTRAL), 0);
 }
 
 void WiFiConfigScreen::updateStatus()
