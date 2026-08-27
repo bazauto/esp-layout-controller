@@ -16,7 +16,12 @@ The ESP32-S3 is dual-core. LVGL rendering runs on a dedicated task; network I/O 
 | `jmri_autoconn` | 4 KB | 5 | Wait for WiFi → auto-connect JMRI | `JmriConnectionController::startAutoConnectTask()` |
 | `jmri_reconnect` | 3 KB | 4 | Monitor connections, exponential backoff | `JmriConnectionController::enableAutoReconnect()` |
 | `rotary_enc` | 3 KB | 4 | I2C encoder polling every 100 ms | `RotaryEncoderHal::startPollingTask()` |
-| `throttle_poll` | — | Timer | `esp_timer`: query speed/direction every 10 s | `ThrottleController::initialize()` |
+| `throttle_poll` | 4 KB | 3 | Refresh speed/direction every 10 s, for allocated throttles only | `ThrottleController::initialize()` |
+
+`throttle_poll` is created **only when the active `ThrottleBackend` reports
+`requiresPolling()`**. WiThrottle does, because it answers queries rather than volunteering
+state; a transport that pushes changes unprompted gets no polling task at all, and its 4 KB
+stack is never allocated.
 
 ---
 

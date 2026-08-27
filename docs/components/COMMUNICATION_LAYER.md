@@ -1,5 +1,57 @@
 # Communication Layer
 
+## ThrottleBackend (port)
+
+**File:** `main/communication/ThrottleBackend.h` — interface only, no `.cpp`.
+
+### Purpose
+
+The transport-neutral seam for driving locomotives. `ThrottleController` depends on this
+and never on a concrete client, so a second transport can be added without the controller
+layer learning either protocol's wire format.
+
+The interface is drawn at "throttle N drives loco A at speed S". Throttle identifiers are
+plain `int` indices; WiThrottle's `'0' + id` character encoding is a wire detail that stays
+behind the adapter.
+
+### Capability queries
+
+Rather than making one protocol impersonate the other, the port asks each backend what it
+can do. WiThrottle is session-oriented and the layout orchestrator's control plane is not,
+and that difference surfaces here rather than as a fake session.
+
+| Query | Meaning when false |
+|-------|--------------------|
+| `requiresAcquisition()` | Locos are addressed directly; acquire/release are local bookkeeping |
+| `providesRoster()` | No selectable roster — the controller must not offer loco selection |
+| `providesFunctionLabels()` | UI falls back to `F0`…`F28` |
+| `requiresPolling()` | State arrives unprompted; no `throttle_poll` task is created |
+
+### Threading
+
+Implementations are called from the LVGL task (through the controller's event handlers) and
+from the polling task, so every method must be safe on more than one task. Callbacks fire on
+whichever task the transport receives on — never assume the LVGL task, and take
+`lvgl_port_lock` before touching a widget from one.
+
+---
+
+## WiThrottleBackend
+
+**File:** `main/communication/WiThrottleBackend.cpp/h`
+
+### Purpose
+
+Adapts `WiThrottleClient` to the `ThrottleBackend` port. Owns nothing — the client is
+injected and outlives it. Translation only: throttle indices to WiThrottle's character ids,
+roster entries to the port's shape, and the two separate speed/direction queries to one
+`refreshThrottleState`. Answers `true` to all four capability queries.
+
+Out-of-range throttle ids arriving from the wire are dropped here rather than passed up as
+negative indices.
+
+---
+
 ## WiFiManager
 
 **File:** `main/communication/WiFiManager.cpp/h`

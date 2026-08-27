@@ -14,6 +14,7 @@ Singleton (Meyer's pattern) that owns all shared services and manages screen lif
 |--------|------|---------|
 | `m_wifiController` | `unique_ptr<WiFiController>` | WiFi lifecycle |
 | `m_wiThrottleClient` | `unique_ptr<WiThrottleClient>` | WiThrottle protocol |
+| `m_throttleBackend` | `unique_ptr<ThrottleBackend>` | The transport in use — held as the port, not the concrete adapter |
 | `m_jmriJsonClient` | `unique_ptr<JmriJsonClient>` | JSON WebSocket |
 | `m_jmriConnectionController` | `unique_ptr<JmriConnectionController>` | Auto-connect + reconnect |
 | `m_throttleController` | `unique_ptr<ThrottleController>` | Throttle/knob state |
@@ -48,12 +49,19 @@ During `initialise()`, the encoder callbacks are connected:
 
 Central coordinator for the 4 throttles and 2 knobs. Implements all state machine logic, routes hardware input, sends network commands, and triggers UI updates.
 
+Drives locos through the `ThrottleBackend` port (see the communication layer) and holds no
+reference to any concrete client, so neither transport's wire format reaches this layer.
+Throttle ids crossing the port are plain `int` indices.
+
 ### Owned Objects
 
 | Object | Count | Type |
 |--------|-------|------|
 | Throttles | 4 | `vector<unique_ptr<Throttle>>` |
 | Knobs | 2 | `vector<unique_ptr<Knob>>` |
+
+The backend is **not** owned — it is injected and must outlive the controller. `AppController`
+guarantees that by declaration order.
 
 ### Constants
 
@@ -105,9 +113,14 @@ Fired after any state change. `MainScreen` registers this and calls `updateAllTh
 
 All public methods acquire `m_stateMutex` before accessing throttle/knob state. The LVGL port lock is **not** acquired inside `ThrottleController` — that's the UI's responsibility.
 
-### Polling Timer
+### Polling Task
 
-An `esp_timer` fires every 10 s, calling `pollThrottleStates()` which queries `qV`/`qR` for all allocated throttles via WiThrottle.
+`throttle_poll` (a FreeRTOS task, 4 KB, priority 3 — not an `esp_timer`) wakes every 10 s and
+calls `pollThrottleStates()`, which calls `refreshThrottleState()` on the backend for each
+allocated throttle. Under WiThrottle that becomes a `qV`/`qR` pair.
+
+The task is created only when the backend reports `requiresPolling()`. A transport that pushes
+state changes gets no task and never allocates its stack.
 
 ---
 

@@ -36,7 +36,7 @@ The project follows a layered architecture where **state lives at the applicatio
 main/
 ├── model/          # Data: Locomotive, Throttle, Knob, Roster
 ├── hardware/       # HAL: rotary encoder driver
-├── communication/  # WiFi, WiThrottle (TCP), JMRI JSON (WebSocket)
+├── communication/  # ThrottleBackend port, WiFi, WiThrottle (TCP), JMRI JSON (WebSocket)
 ├── controller/     # AppController, ThrottleController, WiFiController
 ├── ui/             # LVGL screens and components
 └── tests/          # On-device unit tests (Unity)
@@ -89,7 +89,9 @@ This uses a dedicated build directory so test config doesn't interfere with the 
 
 ## Project Status
 
-All core phases are complete. The device is fully functional with touchscreen UI, WiThrottle/JMRI connectivity, and physical rotary encoder control. Future work includes refinement, optimisation, and potential MQTT cab signal integration.
+All core phases are complete. The device is fully functional with touchscreen UI, WiThrottle/JMRI connectivity, and physical rotary encoder control.
+
+Work in progress: a second throttle transport that speaks to the [layout orchestrator](https://github.com/bazauto/layout-orchestration) over its WebSocket control plane, selectable at runtime alongside WiThrottle. The `ThrottleBackend` port that makes room for it is in place.
 
 ## Licence
 

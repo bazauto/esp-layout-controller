@@ -3,6 +3,7 @@
 #include "../ui/WiFiConfigScreen.h"
 #include "../ui/JmriConfigScreen.h"
 #include "../communication/WiThrottleClient.h"
+#include "../communication/WiThrottleBackend.h"
 #include "../communication/JmriJsonClient.h"
 #include "ThrottleController.h"
 #include "WiFiController.h"
@@ -21,6 +22,7 @@ AppController::AppController()
     , m_jmriConfigScreen(nullptr)
     , m_wiThrottleClient(nullptr)
     , m_jmriClient(nullptr)
+    , m_throttleBackend(nullptr)
     , m_throttleController(nullptr)
     , m_wifiController(nullptr)
     , m_jmriConnectionController(nullptr)
@@ -61,8 +63,15 @@ void AppController::initialise()
         m_jmriConnectionController->startAutoConnectTask();
     }
 
+    // The adapter must outlive the controller that holds a raw pointer to it,
+    // and both are destroyed with this singleton, so declaration order in the
+    // header is what guarantees it.
+    if (!m_throttleBackend) {
+        m_throttleBackend = std::make_unique<WiThrottleBackend>(m_wiThrottleClient.get());
+    }
+
     if (!m_throttleController) {
-        m_throttleController = std::make_unique<ThrottleController>(m_wiThrottleClient.get());
+        m_throttleController = std::make_unique<ThrottleController>(m_throttleBackend.get());
         m_throttleController->initialize();
     }
 

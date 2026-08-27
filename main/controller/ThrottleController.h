@@ -2,7 +2,7 @@
 
 #include "Knob.h"
 #include "Throttle.h"
-#include "WiThrottleClient.h"
+#include "ThrottleBackend.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -15,8 +15,11 @@
  * Coordinates between:
  * - 4 Throttle models (state, loco assignments)
  * - 2 Knob models (state, assignments)
- * - WiThrottle client (network communication)
+ * - A ThrottleBackend (network communication, whichever transport is in use)
  * - UI (ThrottleMeter widgets)
+ *
+ * Depends on the ThrottleBackend port, never on a concrete client, so neither
+ * transport's wire format reaches this layer.
  */
 class ThrottleController
 {
@@ -47,9 +50,10 @@ public:
     
     /**
      * @brief Constructor
-     * @param wiThrottleClient WiThrottle client for network communication
+     * @param backend Transport used to drive locos. Not owned, and must
+     *                outlive this controller.
      */
-    explicit ThrottleController(WiThrottleClient* wiThrottleClient);
+    explicit ThrottleController(ThrottleBackend* backend);
     ~ThrottleController();
     
     /**
@@ -135,7 +139,7 @@ public:
     /**
      * @brief Get loco at roster index
      */
-    bool getLocoAtRosterIndex(int index, WiThrottleClient::Locomotive& outEntry) const;
+    bool getLocoAtRosterIndex(int index, ThrottleBackend::RosterEntry& outEntry) const;
     
     /**
      * @brief Set UI update callback
@@ -163,13 +167,12 @@ private:
     void updateUI();
     void sendSpeedCommand(int throttleId, int speed);
     void sendDirectionCommand(int throttleId, bool forward);
-    std::unique_ptr<Locomotive> createLocomotiveFromRoster(const WiThrottleClient::Locomotive& rosterEntry);
-    
-    // WiThrottle callback handlers
-    void onThrottleStateChanged(const WiThrottleClient::ThrottleUpdate& update);
-    static void throttleStateCallbackWrapper(void* userData, const WiThrottleClient::ThrottleUpdate& update);
+    std::unique_ptr<Locomotive> createLocomotiveFromRoster(const ThrottleBackend::RosterEntry& rosterEntry);
 
-    void onFunctionLabelsReceived(char throttleId, const std::vector<std::string>& labels);
+    // Backend callback handlers
+    void onThrottleStateChanged(const ThrottleBackend::ThrottleUpdate& update);
+
+    void onFunctionLabelsReceived(int throttleId, const std::vector<std::string>& labels);
     
     // Polling for state synchronization
     void pollThrottleStates();
@@ -177,7 +180,7 @@ private:
     void startPollingTimer();
     void stopPollingTimer();
     
-    WiThrottleClient* m_wiThrottleClient;
+    ThrottleBackend* m_backend;
     std::vector<std::unique_ptr<Throttle>> m_throttles;
     std::vector<std::unique_ptr<Knob>> m_knobs;
 

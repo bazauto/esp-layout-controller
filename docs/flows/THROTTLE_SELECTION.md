@@ -17,6 +17,7 @@ sequenceDiagram
     participant K as Knob
     participant T as Throttle
     participant RC as RosterCarousel
+    participant TB as ThrottleBackend
     participant WT as WiThrottleClient
     participant JMRI as JMRI Server
 
@@ -58,7 +59,8 @@ sequenceDiagram
     TC->>K: startControlling()
     Note over K: → CONTROLLING
 
-    TC->>WT: acquireLocomotive("2", "L41", true)
+    TC->>TB: acquireLocomotive(2, 41, true)
+    TB->>WT: acquireLocomotive('2', 41, true)
     WT->>JMRI: Acquire loco command
 
     TC->>MS: uiUpdateCallback()
@@ -67,7 +69,8 @@ sequenceDiagram
 
     JMRI-->>WT: Acquire confirmed
     JMRI-->>WT: Function labels received
-    WT->>TC: onFunctionLabelsReceived(2, labels)
+    WT->>TB: function labels callback
+    TB->>TC: onFunctionLabelsReceived(2, labels)
     TC->>T: clearFunctions() + addFunction() × n
     TC->>MS: uiUpdateCallback()
 

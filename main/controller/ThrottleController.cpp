@@ -8,8 +8,13 @@ static const char* TAG = "ThrottleController";
 static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 
-ThrottleController::ThrottleController(WiThrottleClient* wiThrottleClient)
-    : m_wiThrottleClient(wiThrottleClient)
+// The port validates throttle ids against its own bound, so a divergence here
+// would let an id this controller thinks is valid be refused by every backend.
+static_assert(ThrottleController::NUM_THROTTLES == ThrottleBackend::MAX_THROTTLES,
+              "ThrottleController and ThrottleBackend disagree on the throttle count");
+
+ThrottleController::ThrottleController(ThrottleBackend* backend)
+    : m_backend(backend)
     , m_stateMutex(nullptr)
     , m_uiUpdateCallback(nullptr)
     , m_uiUpdateUserData(nullptr)
@@ -28,17 +33,19 @@ ThrottleController::ThrottleController(WiThrottleClient* wiThrottleClient)
     }
     
     // Register throttle state change callback
-    if (m_wiThrottleClient) {
-        m_wiThrottleClient->setThrottleStateCallback(
-            [this](const WiThrottleClient::ThrottleUpdate& update) {
+    if (m_backend) {
+        m_backend->setThrottleStateCallback(
+            [this](const ThrottleBackend::ThrottleUpdate& update) {
                 this->onThrottleStateChanged(update);
             }
         );
-        m_wiThrottleClient->setFunctionLabelsCallback(
-            [this](char throttleId, const std::vector<std::string>& labels) {
-                this->onFunctionLabelsReceived(throttleId, labels);
-            }
-        );
+        if (m_backend->providesFunctionLabels()) {
+            m_backend->setFunctionLabelsCallback(
+                [this](int throttleId, const std::vector<std::string>& labels) {
+                    this->onFunctionLabelsReceived(throttleId, labels);
+                }
+            );
+        }
     }
 
     m_stateMutex = xSemaphoreCreateMutex();
@@ -253,7 +260,7 @@ void ThrottleController::onKnobPress(int knobId)
         int throttleId = knob->getAssignedThrottleId();
         int rosterIndex = knob->getRosterIndex();
 
-        WiThrottleClient::Locomotive rosterLoco;
+        ThrottleBackend::RosterEntry rosterLoco;
         bool hasRosterEntry = getLocoAtRosterIndex(rosterIndex, rosterLoco);
 
         if (hasRosterEntry && throttleId >= 0) {
@@ -267,10 +274,10 @@ void ThrottleController::onKnobPress(int knobId)
 
             unlockState();
 
-            // Send acquire command to WiThrottle
-            bool isLongAddress = (rosterLoco.addressType == 'L');
-            m_wiThrottleClient->acquireLocomotive('0' + throttleId, rosterLoco.address,
-                                                   isLongAddress);
+            // Bookkeeping on a transport that addresses locos directly; a real
+            // session handshake on one that does not.
+            m_backend->acquireLocomotive(throttleId, rosterLoco.address,
+                                         rosterLoco.longAddress);
 
             ESP_LOGI(TAG, "Knob %d acquired loco '%s' (#%d) on throttle %d",
                      knobId, rosterLoco.name.c_str(), rosterLoco.address, throttleId);
@@ -322,8 +329,11 @@ void ThrottleController::onThrottleRelease(int throttleId)
 
     unlockState();
 
-    // Release loco in WiThrottle
-    m_wiThrottleClient->releaseLocomotive('0' + throttleId);
+    // The local models are already released above, so a missing backend costs
+    // the remote release, not the UI's view of it.
+    if (m_backend) {
+        m_backend->releaseLocomotive(throttleId);
+    }
 
     ESP_LOGI(TAG, "Released throttle %d", throttleId);
     updateUI();
@@ -356,18 +366,18 @@ Knob* ThrottleController::getKnob(int knobId)
 
 size_t ThrottleController::getRosterSize() const
 {
-    if (!m_wiThrottleClient) {
+    if (!m_backend || !m_backend->providesRoster()) {
         return 0;
     }
-    return m_wiThrottleClient->getRosterSize();
+    return m_backend->getRosterSize();
 }
 
-bool ThrottleController::getLocoAtRosterIndex(int index, WiThrottleClient::Locomotive& outEntry) const
+bool ThrottleController::getLocoAtRosterIndex(int index, ThrottleBackend::RosterEntry& outEntry) const
 {
-    if (!m_wiThrottleClient) {
+    if (!m_backend || !m_backend->providesRoster()) {
         return false;
     }
-    return m_wiThrottleClient->getRosterEntry(index, outEntry);
+    return m_backend->getRosterEntry(index, outEntry);
 }
 
 void ThrottleController::setUIUpdateCallback(void (*callback)(void*), void* userData)
@@ -453,9 +463,9 @@ bool ThrottleController::getRosterSelectionSnapshot(RosterSelectionSnapshot& out
         }
     }
 
-    if (outSnapshot.active && m_wiThrottleClient) {
-        WiThrottleClient::Locomotive entry;
-        if (m_wiThrottleClient->getRosterEntry(outSnapshot.rosterIndex, entry)) {
+    if (outSnapshot.active && m_backend && m_backend->providesRoster()) {
+        ThrottleBackend::RosterEntry entry;
+        if (m_backend->getRosterEntry(outSnapshot.rosterIndex, entry)) {
             outSnapshot.hasRosterEntry = true;
             outSnapshot.rosterName = entry.name;
             outSnapshot.rosterAddress = entry.address;
@@ -517,36 +527,38 @@ bool ThrottleController::getFunctionState(int throttleId, int functionNumber, bo
 
 void ThrottleController::sendSpeedCommand(int throttleId, int speed)
 {
-    // '0' + throttleId gives '0', '1', '2', or '3' - used to convert to char
-    m_wiThrottleClient->setSpeed('0' + throttleId, speed);
+    if (!m_backend) {
+        return;
+    }
+    m_backend->setSpeed(throttleId, speed);
 }
 
 void ThrottleController::sendDirectionCommand(int throttleId, bool forward)
 {
-    // '0' + throttleId gives '0', '1', '2', or '3' - used to convert to char
-    m_wiThrottleClient->setDirection('0' + throttleId, forward);
+    if (!m_backend) {
+        return;
+    }
+    m_backend->setDirection(throttleId, forward);
 }
 
-std::unique_ptr<Locomotive> ThrottleController::createLocomotiveFromRoster(const WiThrottleClient::Locomotive& rosterEntry)
+std::unique_ptr<Locomotive> ThrottleController::createLocomotiveFromRoster(const ThrottleBackend::RosterEntry& rosterEntry)
 {
-    // Convert WiThrottle address type to our enum
-    Locomotive::AddressType addressType = (rosterEntry.addressType == 'L') 
-        ? Locomotive::AddressType::LONG 
+    Locomotive::AddressType addressType = rosterEntry.longAddress
+        ? Locomotive::AddressType::LONG
         : Locomotive::AddressType::SHORT;
-    
+
     return std::make_unique<Locomotive>(rosterEntry.name, rosterEntry.address, addressType);
 }
 
-void ThrottleController::onThrottleStateChanged(const WiThrottleClient::ThrottleUpdate& update)
+void ThrottleController::onThrottleStateChanged(const ThrottleBackend::ThrottleUpdate& update)
 {
-    // Convert char throttleId '0'-'3' to int 0-3
-    int throttleId = update.throttleId - '0';
-    
+    const int throttleId = update.throttleId;
+
     if (throttleId < 0 || throttleId >= NUM_THROTTLES) {
-        ESP_LOGW(TAG, "Invalid throttle ID in update: %c", update.throttleId);
+        ESP_LOGW(TAG, "Invalid throttle ID in update: %d", throttleId);
         return;
     }
-    
+
     if (!lockState(pdMS_TO_TICKS(50))) {
         ESP_LOGW(TAG, "Failed to lock state for throttle update");
         return;
@@ -578,11 +590,10 @@ void ThrottleController::onThrottleStateChanged(const WiThrottleClient::Throttle
     updateUI();
 }
 
-void ThrottleController::onFunctionLabelsReceived(char throttleIdChar, const std::vector<std::string>& labels)
+void ThrottleController::onFunctionLabelsReceived(int throttleId, const std::vector<std::string>& labels)
 {
-    int throttleId = throttleIdChar - '0';
     if (throttleId < 0 || throttleId >= NUM_THROTTLES) {
-        ESP_LOGW(TAG, "Invalid throttle ID for function labels: %c", throttleIdChar);
+        ESP_LOGW(TAG, "Invalid throttle ID for function labels: %d", throttleId);
         return;
     }
 
@@ -617,10 +628,10 @@ void ThrottleController::onFunctionLabelsReceived(char throttleIdChar, const std
 
 void ThrottleController::pollThrottleStates()
 {
-    if (!m_wiThrottleClient || !m_wiThrottleClient->isConnected()) {
+    if (!m_backend || !m_backend->isConnected()) {
         return;
     }
-    
+
     // Snapshot which throttles are allocated while holding the mutex
     bool needsPoll[NUM_THROTTLES] = {};
     if (lockState(pdMS_TO_TICKS(50))) {
@@ -638,9 +649,7 @@ void ThrottleController::pollThrottleStates()
     // Issue network queries outside the lock
     for (int i = 0; i < NUM_THROTTLES; i++) {
         if (needsPoll[i]) {
-            char throttleId = '0' + i;
-            m_wiThrottleClient->querySpeed(throttleId);
-            m_wiThrottleClient->queryDirection(throttleId);
+            m_backend->refreshThrottleState(i);
             ESP_LOGD(TAG, "Polling throttle %d state", i);
         }
     }
@@ -665,7 +674,14 @@ void ThrottleController::startPollingTimer()
         ESP_LOGW(TAG, "Polling task already started");
         return;
     }
-    
+
+    // A transport that pushes state changes needs no poller at all. Skipping
+    // the task rather than letting it spin saves its 4 KB stack outright.
+    if (!m_backend || !m_backend->requiresPolling()) {
+        ESP_LOGI(TAG, "Backend pushes throttle state; no polling task started");
+        return;
+    }
+
     m_pollingRunning = true;
     BaseType_t ret = xTaskCreate(pollingTaskFunc, "throttle_poll", 4096, this, 3, &m_pollingTask);
     if (ret != pdPASS) {

@@ -23,6 +23,7 @@ set(APP_SRCS
     # Communication layer (C++)
     "communication/WiFiManager.cpp"
     "communication/WiThrottleClient.cpp"
+    "communication/WiThrottleBackend.cpp"
     "communication/JmriJsonClient.cpp"
     
     # UI layer (C++)

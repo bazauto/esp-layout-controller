@@ -15,6 +15,7 @@ sequenceDiagram
     participant TC as ThrottleController
     participant T as Throttle
     participant K as Knob
+    participant TB as ThrottleBackend
     participant WT as WiThrottleClient
     participant JMRI as JMRI Server
     participant MS as MainScreen
@@ -30,11 +31,13 @@ sequenceDiagram
     TC->>T: setDirection(signedSpeed > 0)
     Note over T: Optimistic local update
 
-    TC->>WT: setSpeed("0", 50)
+    TC->>TB: setSpeed(0, 50)
+    TB->>WT: setSpeed('0', 50)
     WT->>JMRI: Send speed command
 
     opt Direction changed
-        TC->>WT: setDirection("0", true)
+        TC->>TB: setDirection(0, true)
+        TB->>WT: setDirection('0', true)
         WT->>JMRI: Send direction command
     end
 
@@ -49,7 +52,8 @@ sequenceDiagram
 
     Note over TC,JMRI: Confirmation (async)
     JMRI-->>WT: Acknowledgement received
-    WT->>TC: onThrottleStateChanged(update)
+    WT->>TB: throttle state callback
+    TB->>TC: onThrottleStateChanged(update)
     TC->>T: setSpeed(50)
     Note over T: Confirmed by server
 ```
@@ -85,7 +89,8 @@ sequenceDiagram
     User->>TC: onKnobPress(knobId)
     Note over TC: Knob state == CONTROLLING
     TC->>T: setSpeed(0)
-    TC->>WT: setSpeed(throttleId, 0)
+    TC->>TB: setSpeed(throttleId, 0)
+    TB->>WT: setSpeed('0'+id, 0)
     Note over T: Speed = 0, stays ALLOCATED_WITH_KNOB
 ```
 
@@ -104,11 +109,12 @@ sequenceDiagram
 
     Timer->>TC: pollThrottleStates()
     loop For each ALLOCATED throttle
-        TC->>WT: querySpeed(throttleId)
-        TC->>WT: queryDirection(throttleId)
+        TC->>TB: refreshThrottleState(throttleId)
+        TB->>WT: querySpeed + queryDirection
     end
     WT->>JMRI: Send qV and qR queries
     JMRI-->>WT: Response with speed and direction
-    WT->>TC: onThrottleStateChanged(updates)
+    WT->>TB: throttle state callbacks
+    TB->>TC: onThrottleStateChanged(updates)
     TC->>TC: Update model if different
 ```
