@@ -1,5 +1,6 @@
 #include "JmriConfigScreen.h"
 #include "wrappers/main_screen_wrapper.h"
+#include "wrappers/orchestrator_config_wrapper.h"
 #include "esp_log.h"
 #include "../controller/ThrottleController.h"
 #include "../controller/WiFiController.h"
@@ -49,6 +50,8 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
     , m_wiThrottlePortInput(nullptr)
     , m_powerManagerInput(nullptr)
         , m_speedStepsInput(nullptr)
+    , m_transportDropdown(nullptr)
+    , m_transportNoteLabel(nullptr)
     , m_statusWifiValue(nullptr)
     , m_statusWiThrottleValue(nullptr)
     , m_statusJsonValue(nullptr)
@@ -105,6 +108,7 @@ lv_obj_t* JmriConfigScreen::create()
     
     // Create sections
     createStatusSection(scrollContainer);
+    createTransportSection(scrollContainer);
     createConfigSection(scrollContainer);
     createSystemStatusSection(scrollContainer);
     createButtonSection(buttonContainer);
@@ -271,6 +275,97 @@ void JmriConfigScreen::createConfigSection(lv_obj_t* parent)
     lv_obj_add_event_cb(m_speedStepsInput, onTextAreaDefocused, LV_EVENT_DEFOCUSED, this);
 
     // Notes removed to make space for status summary row
+}
+
+void JmriConfigScreen::createTransportSection(lv_obj_t* parent)
+{
+    lv_obj_t* container = lv_obj_create(parent);
+    lv_obj_remove_style_all(container);
+    lv_obj_set_size(container, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(container, 12, 0);
+    lv_obj_set_style_pad_bottom(container, 12, 0);
+
+    lv_obj_t* label = lv_label_create(container);
+    lv_label_set_text(label, "Throttle transport:");
+
+    // A choice, not two independent enables: exactly one transport drives locos
+    // at a time, and only the selected one's network stack is brought up. That
+    // is what stops the device retrying a server the operator is not using.
+    m_transportDropdown = lv_dropdown_create(container);
+    lv_dropdown_set_options(m_transportDropdown, "WiThrottle (JMRI)\nLayout Orchestrator");
+    lv_obj_set_width(m_transportDropdown, 260);
+    lv_obj_add_event_cb(m_transportDropdown, onTransportChanged, LV_EVENT_VALUE_CHANGED, this);
+
+    lv_obj_t* orchButton = lv_btn_create(container);
+    lv_obj_set_size(orchButton, 220, 40);
+    lv_obj_set_style_bg_color(orchButton, lv_color_hex(0x1d4e89), 0);
+    lv_obj_add_event_cb(orchButton, onOrchestratorSettingsClicked, LV_EVENT_CLICKED, this);
+    lv_obj_t* orchLabel = lv_label_create(orchButton);
+    lv_label_set_text(orchLabel, "Orchestrator Settings");
+    lv_obj_center(orchLabel);
+
+    m_transportNoteLabel = lv_label_create(parent);
+    lv_label_set_text(m_transportNoteLabel, "");
+    lv_obj_set_style_text_color(m_transportNoteLabel, lv_color_hex(0xfab005), 0);
+    lv_obj_set_width(m_transportNoteLabel, LV_PCT(100));
+}
+
+void JmriConfigScreen::onTransportChanged(lv_event_t* e)
+{
+    auto* self = static_cast<JmriConfigScreen*>(lv_event_get_user_data(e));
+    if (!self || !self->m_transportDropdown) {
+        return;
+    }
+
+    const uint16_t selected = lv_dropdown_get_selected(self->m_transportDropdown);
+    const ThrottleTransport chosen = (selected == 1) ? ThrottleTransport::ORCHESTRATOR
+                                                     : ThrottleTransport::WITHROTTLE;
+
+    // Read-modify-write so the orchestrator's own settings survive.
+    TransportSettings settings = TransportSettings::load();
+
+    if (chosen == ThrottleTransport::ORCHESTRATOR && !settings.isOrchestratorConfigured()) {
+        // Refuse rather than save a selection that would boot into a dead
+        // transport with every knob disabled and nothing explaining why.
+        lv_dropdown_set_selected(self->m_transportDropdown, 0);
+        if (self->m_transportNoteLabel) {
+            lv_label_set_text(self->m_transportNoteLabel,
+                              "Set the orchestrator host and operator credential first.");
+        }
+        return;
+    }
+
+    settings.transport = chosen;
+    settings.save();
+
+    if (self->m_transportNoteLabel) {
+        // The backend is chosen once, during initialise(), because swapping it
+        // under a live ThrottleController would strand locos mid-command.
+        lv_label_set_text(self->m_transportNoteLabel,
+                          "Saved. Restart the device for the transport change to take effect.");
+    }
+}
+
+void JmriConfigScreen::onOrchestratorSettingsClicked(lv_event_t* e)
+{
+    auto* self = static_cast<JmriConfigScreen*>(lv_event_get_user_data(e));
+    if (!self) {
+        return;
+    }
+
+    self->hideKeyboard();
+    self->m_jsonClient.setConnectionStateCallback(nullptr);
+    self->m_wiThrottleClient.setConnectionStateCallback(nullptr);
+
+    show_orchestrator_config_screen();
+
+    if (self->m_screen) {
+        lv_obj_del_async(self->m_screen);
+        self->clearUiPointers();
+    }
 }
 
 void JmriConfigScreen::createButtonSection(lv_obj_t* parent)
@@ -638,6 +733,16 @@ void JmriConfigScreen::loadSettings()
     }
     
     nvs_close(handle);
+
+    // The transport choice lives in its own namespace, not the JMRI one, so it
+    // is read separately rather than from the handle above.
+    if (m_transportDropdown) {
+        const TransportSettings transportSettings = TransportSettings::load();
+        lv_dropdown_set_selected(
+            m_transportDropdown,
+            transportSettings.transport == ThrottleTransport::ORCHESTRATOR ? 1 : 0);
+    }
+
     ESP_LOGI(TAG, "JMRI settings loaded");
 }
 
@@ -703,6 +808,8 @@ void JmriConfigScreen::clearUiPointers()
     m_wiThrottlePortInput = nullptr;
     m_powerManagerInput = nullptr;
     m_speedStepsInput = nullptr;
+    m_transportDropdown = nullptr;
+    m_transportNoteLabel = nullptr;
     m_statusWifiValue = nullptr;
     m_statusWiThrottleValue = nullptr;
     m_statusJsonValue = nullptr;

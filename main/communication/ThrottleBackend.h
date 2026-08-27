@@ -132,6 +132,27 @@ public:
     virtual esp_err_t setFunction(int throttleId, int function, bool state) = 0;
 
     /**
+     * @brief Change speed and direction as one movement.
+     *
+     * Callers must use this rather than setSpeed followed by setDirection
+     * whenever both change at once. Sending the new speed against the old
+     * direction first commands the loco *faster the way it was already going*
+     * before reversing it, which on a fast knob spin is a real jolt on the
+     * layout rather than a theoretical one.
+     *
+     * The default sends direction first and speed second, which is the safe
+     * ordering for a transport that has no combined command. A transport whose
+     * wire format already carries the pair -- the orchestrator's
+     * THROTTLE_COMMAND does -- overrides this to send exactly one message.
+     */
+    virtual esp_err_t setSpeedAndDirection(int throttleId, int speed, bool forward)
+    {
+        const esp_err_t dirErr = setDirection(throttleId, forward);
+        const esp_err_t speedErr = setSpeed(throttleId, speed);
+        return (dirErr != ESP_OK) ? dirErr : speedErr;
+    }
+
+    /**
      * @brief Ask the transport to restate a throttle's speed and direction.
      *
      * Called only when requiresPolling() is true. The answer arrives through

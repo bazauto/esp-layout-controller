@@ -71,7 +71,7 @@ All core phases complete. The device is fully functional with touchscreen UI, Wi
   - Receive updates from other throttles controlling same locos
 - **Multi-Throttle Support**: Handle concurrent control from multiple sources
 
-### 5. Orchestrator WebSocket Transport (In Progress)
+### 5. Orchestrator WebSocket Transport
 - Second `ThrottleBackend` alongside WiThrottle, selectable at runtime
 - Reaches the layout orchestrator over its `/ws` control plane, authenticated with the
   session cookie from `POST /api/auth/login`
@@ -167,7 +167,7 @@ void show_main_screen(void) {
 
 - **ThrottleBackend**: transport-neutral port the controller drives locos through
   - `WiThrottleBackend` adapts the existing WiThrottle client
-  - An orchestrator WebSocket backend is the second implementation (in progress)
+  - `OrchestratorBackend` speaks the orchestrator's WebSocket control plane
   - Capability queries (roster, acquisition, function labels, polling) rather than one
     protocol impersonating the other
 
@@ -356,11 +356,12 @@ void onNetworkCallback(void* userData) {
 - [x] WiFi configuration UI
 - [x] Power status display
 
-### In Progress: Orchestrator WebSocket Transport
+### Orchestrator WebSocket Transport
 - [x] `ThrottleBackend` port, with `WiThrottleBackend` behind it
-- [ ] Orchestrator WebSocket backend (login, cookie, `/ws`, message parsing)
-- [ ] `operator` credential in NVS
-- [ ] Runtime transport picker in the config screen, persisted to NVS
+- [x] Orchestrator WebSocket backend (login, cookie, `/ws`, message parsing)
+- [x] `operator` credential in NVS
+- [x] Runtime transport picker, persisted to NVS, with its own config screen
+- [ ] Operator-authored function labels (blocked orchestrator-side)
 
 ## Key Considerations & Questions
 

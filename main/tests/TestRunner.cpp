@@ -4,6 +4,7 @@ extern void register_throttle_tests(void);
 extern "C" void register_controller_tests(void);
 extern "C" void register_locomotive_tests(void);
 extern "C" void register_protocol_tests(void);
+extern "C" void register_orchestrator_tests(void);
 
 extern "C" void run_throttle_tests(void)
 {
@@ -12,5 +13,6 @@ extern "C" void run_throttle_tests(void)
     register_controller_tests();
     register_locomotive_tests();
     register_protocol_tests();
+    register_orchestrator_tests();
     UNITY_END();
 }

@@ -221,11 +221,13 @@ void ThrottleController::onKnobRotation(int knobId, int delta)
     unlockState();
 
     if (shouldSendSpeed && throttleId >= 0) {
-        // Send command to WiThrottle
-        sendSpeedCommand(throttleId, newSpeed);
-
         if (shouldSendDirection) {
-            sendDirectionCommand(throttleId, newDirection);
+            // One movement, not two. Sending the new speed against the old
+            // direction first would command the loco faster the way it was
+            // already going, and only then reverse it.
+            sendSpeedAndDirectionCommand(throttleId, newSpeed, newDirection);
+        } else {
+            sendSpeedCommand(throttleId, newSpeed);
         }
 
     ESP_LOGI(TAG, "Knob %d changed throttle %d speed: %d -> %d (dir: %s -> %s, steps: %d, optimistic + polling)",
@@ -539,6 +541,14 @@ void ThrottleController::sendDirectionCommand(int throttleId, bool forward)
         return;
     }
     m_backend->setDirection(throttleId, forward);
+}
+
+void ThrottleController::sendSpeedAndDirectionCommand(int throttleId, int speed, bool forward)
+{
+    if (!m_backend) {
+        return;
+    }
+    m_backend->setSpeedAndDirection(throttleId, speed, forward);
 }
 
 std::unique_ptr<Locomotive> ThrottleController::createLocomotiveFromRoster(const ThrottleBackend::RosterEntry& rosterEntry)

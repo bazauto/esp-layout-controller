@@ -2,9 +2,17 @@
 #include "../ui/MainScreen.h"
 #include "../ui/WiFiConfigScreen.h"
 #include "../ui/JmriConfigScreen.h"
+#include "../ui/OrchestratorConfigScreen.h"
 #include "../communication/WiThrottleClient.h"
 #include "../communication/WiThrottleBackend.h"
+#include "../communication/OrchestratorClient.h"
+#include "../communication/OrchestratorBackend.h"
 #include "../communication/JmriJsonClient.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static const char* TAG = "AppController";
 #include "ThrottleController.h"
 #include "WiFiController.h"
 #include "JmriConnectionController.h"
@@ -21,6 +29,7 @@ AppController::AppController()
     , m_wifiConfigScreen(nullptr)
     , m_jmriConfigScreen(nullptr)
     , m_wiThrottleClient(nullptr)
+    , m_orchestratorClient(nullptr)
     , m_jmriClient(nullptr)
     , m_throttleBackend(nullptr)
     , m_throttleController(nullptr)
@@ -42,6 +51,12 @@ void AppController::initialise()
         m_wifiController->autoConnect();
     }
 
+    // Loaded before anything connects: it decides which network stack is
+    // allowed to come up at all, not merely which one drives locos.
+    m_transportSettings = TransportSettings::load();
+    const bool useOrchestrator =
+        (m_transportSettings.transport == ThrottleTransport::ORCHESTRATOR);
+
     if (!m_wiThrottleClient) {
         m_wiThrottleClient = std::make_unique<WiThrottleClient>();
         m_wiThrottleClient->initialize();
@@ -59,15 +74,32 @@ void AppController::initialise()
             m_wifiController.get());
     }
 
-    if (m_jmriConnectionController) {
+    // Only the selected transport's stack is brought up. Auto-connecting
+    // WiThrottle and the JMRI JSON client while the operator has chosen the
+    // orchestrator would sit there retrying a server they deliberately are not
+    // using, and would light the JMRI status indicators for a link nothing
+    // drives.
+    if (m_jmriConnectionController && !useOrchestrator) {
         m_jmriConnectionController->startAutoConnectTask();
+    } else if (useOrchestrator) {
+        ESP_LOGI(TAG, "Orchestrator transport selected; JMRI auto-connect not started");
     }
 
     // The adapter must outlive the controller that holds a raw pointer to it,
     // and both are destroyed with this singleton, so declaration order in the
     // header is what guarantees it.
     if (!m_throttleBackend) {
-        m_throttleBackend = std::make_unique<WiThrottleBackend>(m_wiThrottleClient.get());
+        if (useOrchestrator) {
+            m_orchestratorClient = std::make_unique<OrchestratorClient>();
+            m_orchestratorClient->initialize();
+            m_throttleBackend = std::make_unique<OrchestratorBackend>(m_orchestratorClient.get());
+            startOrchestratorConnectTask();
+        } else {
+            m_throttleBackend = std::make_unique<WiThrottleBackend>(m_wiThrottleClient.get());
+        }
+
+        ESP_LOGI(TAG, "Throttle transport: %s",
+                 TransportSettings::transportName(m_transportSettings.transport));
     }
 
     if (!m_throttleController) {
@@ -139,6 +171,20 @@ void AppController::showJmriConfigScreen()
     m_jmriConfigScreen->create();
 }
 
+void AppController::showOrchestratorConfigScreen()
+{
+    initialise();
+
+    if (!m_orchestratorConfigScreen) {
+        // The client is null unless the orchestrator is the selected transport.
+        // The screen handles that and still lets the settings be edited, so a
+        // switch can be configured before it is switched to.
+        m_orchestratorConfigScreen = std::make_unique<OrchestratorConfigScreen>(
+            m_orchestratorClient.get(), m_wifiController.get());
+    }
+    m_orchestratorConfigScreen->create();
+}
+
 void AppController::autoConnectJmri()
 {
     initialise();
@@ -152,9 +198,74 @@ JmriJsonClient* AppController::getJmriClient() const
     return m_jmriClient.get();
 }
 
+void AppController::orchestratorConnectTask(void* arg)
+{
+    auto* self = static_cast<AppController*>(arg);
+
+    // Wait for WiFi before the login POST. Up to 30 s, matching what
+    // JmriConnectionController's auto-connect task allows.
+    for (int i = 0; i < 60; ++i) {
+        if (self->m_wifiController && self->m_wifiController->isConnected()) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    if (!self->m_wifiController || !self->m_wifiController->isConnected()) {
+        ESP_LOGW(TAG, "No WiFi; orchestrator connect abandoned");
+        self->m_orchestratorTask = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    const TransportSettings& s = self->m_transportSettings;
+    esp_err_t err = self->m_orchestratorClient->connect(s.host, s.port, s.username, s.password);
+
+    if (err == ESP_OK) {
+        // The roster is a REST read and needs the session cookie the login just
+        // produced, so it happens here rather than on the socket's event task.
+        self->m_orchestratorClient->refreshRoster();
+    } else {
+        ESP_LOGE(TAG, "Orchestrator connect failed: %s", esp_err_to_name(err));
+    }
+
+    self->m_orchestratorTask = nullptr;
+    vTaskDelete(nullptr);
+}
+
+void AppController::startOrchestratorConnectTask()
+{
+    if (m_orchestratorTask != nullptr) {
+        ESP_LOGW(TAG, "Orchestrator connect task already running");
+        return;
+    }
+
+    // Its own task because the login is a blocking HTTP round trip and the
+    // roster is two more. None of that may happen on the LVGL task (F-05).
+    // 6 KB covers the TLS-capable HTTP client's stack use.
+    TaskHandle_t handle = nullptr;
+    BaseType_t ret = xTaskCreate(orchestratorConnectTask, "orch_connect", 6144, this, 5, &handle);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create orchestrator connect task");
+        m_orchestratorTask = nullptr;
+        return;
+    }
+    m_orchestratorTask = handle;
+}
+
 WiThrottleClient* AppController::getWiThrottleClient() const
 {
     return m_wiThrottleClient.get();
+}
+
+OrchestratorClient* AppController::getOrchestratorClient() const
+{
+    return m_orchestratorClient.get();
+}
+
+const TransportSettings& AppController::getTransportSettings() const
+{
+    return m_transportSettings;
 }
 
 WiFiController* AppController::getWiFiController() const

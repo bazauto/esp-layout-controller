@@ -3,6 +3,7 @@
 #include "lvgl.h"
 #include "../communication/JmriJsonClient.h"
 #include "../communication/WiThrottleClient.h"
+#include "../controller/TransportSettings.h"
 #include <atomic>
 #include <string>
 
@@ -50,6 +51,7 @@ private:
     void createStatusSection(lv_obj_t* parent);
     void createConfigSection(lv_obj_t* parent);
     void createSystemStatusSection(lv_obj_t* parent);
+    void createTransportSection(lv_obj_t* parent);
     void createButtonSection(lv_obj_t* parent);
     void createKeyboard();
 
@@ -72,6 +74,8 @@ private:
     static void onConnectButtonClicked(lv_event_t* e);
     static void onDisconnectButtonClicked(lv_event_t* e);
     static void onBackButtonClicked(lv_event_t* e);
+    static void onTransportChanged(lv_event_t* e);
+    static void onOrchestratorSettingsClicked(lv_event_t* e);
     static void onTextAreaFocused(lv_event_t* e);
     static void onTextAreaDefocused(lv_event_t* e);
     static void connectTask(void* arg);
@@ -82,6 +86,8 @@ private:
     lv_obj_t* m_wiThrottlePortInput;
     lv_obj_t* m_powerManagerInput;
     lv_obj_t* m_speedStepsInput;
+    lv_obj_t* m_transportDropdown;
+    lv_obj_t* m_transportNoteLabel;
     lv_obj_t* m_statusWifiValue;
     lv_obj_t* m_statusWiThrottleValue;
     lv_obj_t* m_statusJsonValue;

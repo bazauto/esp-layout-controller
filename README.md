@@ -14,6 +14,7 @@ this — the handheld throttle.
 - **2 rotary encoders** — physical speed knobs with push-button assignment via Adafruit I2C Seesaw encoders
 - **Touch UI** — 800×480 LVGL interface with throttle meters, roster carousel, and function buttons
 - **WiThrottle protocol** — standard wireless throttle protocol, compatible with JMRI and other WiThrottle servers
+- **Orchestrator WebSocket** — cookie-authenticated control plane for the Westgate Hollow layout orchestrator
 - **JMRI JSON API** — WebSocket connection for track power control and roster retrieval
 - **NVS persistence** — WiFi credentials and JMRI server settings saved across reboots
 - **Virtual encoders** — on-screen encoder substitutes for development without physical hardware
@@ -36,7 +37,8 @@ The project follows a layered architecture where **state lives at the applicatio
 main/
 ├── model/          # Data: Locomotive, Throttle, Knob, Roster
 ├── hardware/       # HAL: rotary encoder driver
-├── communication/  # ThrottleBackend port, WiFi, WiThrottle (TCP), JMRI JSON (WebSocket)
+├── communication/  # ThrottleBackend port + transports, WiFi, WiThrottle (TCP),
+│                   # JMRI JSON and orchestrator control plane (WebSocket)
 ├── controller/     # AppController, ThrottleController, WiFiController
 ├── ui/             # LVGL screens and components
 └── tests/          # On-device unit tests (Unity)
@@ -91,7 +93,7 @@ This uses a dedicated build directory so test config doesn't interfere with the 
 
 All core phases are complete. The device is fully functional with touchscreen UI, WiThrottle/JMRI connectivity, and physical rotary encoder control.
 
-Work in progress: a second throttle transport that speaks to the [layout orchestrator](https://github.com/bazauto/layout-orchestration) over its WebSocket control plane, selectable at runtime alongside WiThrottle. The `ThrottleBackend` port that makes room for it is in place.
+Two throttle transports, selectable at runtime from the settings screen and persisted in NVS: **WiThrottle** to JMRI, or the [layout orchestrator](https://github.com/bazauto/layout-orchestration)'s **WebSocket control plane**. Only the selected one's network stack is started. Both are first-class; neither is a legacy path.
 
 ## Licence
 

@@ -19,11 +19,14 @@ set(APP_SRCS
     "controller/AppController.cpp"
     "controller/WiFiController.cpp"
     "controller/JmriConnectionController.cpp"
+    "controller/TransportSettings.cpp"
     
     # Communication layer (C++)
     "communication/WiFiManager.cpp"
     "communication/WiThrottleClient.cpp"
     "communication/WiThrottleBackend.cpp"
+    "communication/OrchestratorClient.cpp"
+    "communication/OrchestratorBackend.cpp"
     "communication/JmriJsonClient.cpp"
     
     # UI layer (C++)
@@ -36,10 +39,16 @@ set(APP_SRCS
     "ui/wrappers/wifi_config_wrapper.cpp"
     "ui/JmriConfigScreen.cpp"
     "ui/wrappers/jmri_config_wrapper.cpp"
+    "ui/OrchestratorConfigScreen.cpp"
+    "ui/wrappers/orchestrator_config_wrapper.cpp"
     "ui/MainScreen.cpp"
     "ui/wrappers/main_screen_wrapper.cpp"
 )
 
+# Deliberately empty: `main` implicitly depends on every component in the
+# build, which is where esp_wifi, nvs_flash, json (cJSON) and esp_http_client
+# all come from. Naming some explicitly replaces that implicit set rather than
+# adding to it, and the build then fails on the ones left unlisted.
 set(REQUIRES_LIST)
 
 if(CONFIG_THROTTLE_TESTS)
@@ -47,6 +56,7 @@ if(CONFIG_THROTTLE_TESTS)
         "tests/ThrottleControllerTests.cpp"
         "tests/LocomotiveTests.cpp"
         "tests/ProtocolParsingTests.cpp"
+        "tests/OrchestratorProtocolTests.cpp"
         "tests/ThrottleModelTests.cpp"
         "tests/TestRunner.cpp"
     )

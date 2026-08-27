@@ -55,7 +55,8 @@ firmware changes matters. `.github/` also holds the review agents and Copilot in
 
 **1. The flash budget is real and tight.** The factory partition is **1500 K**
 (`partitions_singleapp_large.csv`, IDF v5.5.2 — not the 3 MB the 8 MB flash suggests). The
-last local build was ~1.25 MB, leaving roughly **250 KB**. There is **no OTA partition**:
+last local build was ~1.29 MB, leaving roughly **178 KB (12%)** — the orchestrator transport
+cost about 70 KB of that, cJSON and `esp_http_client` included. There is **no OTA partition**:
 `singleapp_large` is factory-only, so every flash is a cable at the layout, and adding OTA
 later would halve the remaining headroom. Re-measure with `idf.py size` rather than
 trusting that number; treat a new managed component as a decision, not a detail.
@@ -85,8 +86,9 @@ to a task (F-05). A blocked handler freezes rendering and input for every thrott
 main/
 ├── model/          Throttle, Knob, Locomotive — data, no I/O
 ├── hardware/       RotaryEncoderHal — I2C Seesaw encoder polling
-├── communication/  ThrottleBackend (port), WiThrottleBackend, WiFiManager,
-│                   WiThrottleClient (TCP), JmriJsonClient (WebSocket)
+├── communication/  ThrottleBackend (port), WiThrottleBackend, OrchestratorBackend,
+│                   WiFiManager, WiThrottleClient (TCP), JmriJsonClient (WebSocket),
+│                   OrchestratorClient (WebSocket control plane)
 ├── controller/     AppController, ThrottleController, WiFiController, JmriConnectionController
 └── ui/             LVGL screens and components
 ```
@@ -130,9 +132,9 @@ has ever published or subscribed to that topic. The orchestrator drives DCC over
 PicoDCC. MQTT is the hardware telemetry bus (sensors, point feedback); WebSocket is the
 operator control plane, and this is an operator device.
 
-## Where this is going
+## The two transports
 
-Decided 2026-08-24, not yet built. Recorded so it is not re-litigated:
+Decided 2026-08-24, **built 2026-08-27**. Recorded so it is not re-litigated:
 
 - **The orchestrator is reached over its WebSocket `/ws`**, not MQTT. Auth is the existing
   session cookie: POST `/api/auth/login`, capture `Set-Cookie`, set `Cookie:` on the
@@ -144,13 +146,19 @@ Decided 2026-08-24, not yet built. Recorded so it is not re-litigated:
   selectable at **runtime** from the config screen, persisted in NVS. Deliberately not a
   Kconfig choice: with no OTA, a compile-time switch means a cable at the layout to A/B a
   bug, and it would multiply an already-forked build matrix.
-- **The seam is a `ThrottleBackend` port — this part is built.** `ThrottleController`
-  depends on the interface, `WiThrottleBackend` adapts the existing client behind it, and
-  `AppController` owns the backend as the port type. Capabilities
+- **The seam is a `ThrottleBackend` port.** `ThrottleController` depends on the interface;
+  `WiThrottleBackend` and `OrchestratorBackend` sit behind it. Capabilities
   (`requiresAcquisition` / `providesRoster` / `providesFunctionLabels` / `requiresPolling`)
   are how each backend answers in its own terms; do **not** make one protocol impersonate
-  the other. What remains is the orchestrator backend itself, the NVS credential, and the
-  runtime transport picker. See `docs/components/COMMUNICATION_LAYER.md`.
+  the other. See `docs/components/COMMUNICATION_LAYER.md`.
+- **Only the selected transport's stack comes up.** `AppController::initialise()` reads
+  `TransportSettings` before anything connects. Under the orchestrator, JMRI auto-connect is
+  never started; under WiThrottle, no orchestrator task exists. The device must never sit
+  retrying a server the operator did not choose.
+- **`setSpeedAndDirection` is the call to use when both change.** `THROTTLE_COMMAND` carries
+  the pair, and sending speed against the *old* direction first commands the loco faster the
+  way it was already going before reversing it. The port's default implementation orders it
+  direction-then-speed for transports with no combined command.
 
 ## Traps
 
@@ -161,8 +169,13 @@ Things that look like bugs or oversights and are not. One line each.
   unguarded ones). They must never gain a non-test caller.
 - **`JmriJsonClient` parses JSON by substring search** (`extractJsonString` /
   `extractJsonInt`) rather than with a parser. Adequate for the narrow JMRI subset it
-  reads; **not** adequate for orchestrator payloads, which need a parser that can *refuse*
-  a malformed message rather than half-parse one into a speed command.
+  reads; **not** adequate for orchestrator payloads. `OrchestratorClient` uses cJSON and
+  refuses a malformed message outright rather than half-parsing one into a speed command —
+  do not "simplify" it back to substring search.
+- **A `STATE_SNAPSHOT` updates the display, never the outbound command path.** It describes
+  what the layout believes, including locos already moving that this device did not start.
+  Replaying it as commands on reconnect is exactly the ghost-movement bug the orchestrator's
+  non-retained control topics exist to prevent.
 - **The WiFi password is stored in plaintext NVS** — an accepted and documented risk
   (F-18), not an oversight.
 - **`json_port` is normally discovered from the WiThrottle `PW` message**, not configured,
