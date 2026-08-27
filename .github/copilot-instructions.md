@@ -59,6 +59,11 @@ UI Layer (MainScreen)
 across that port are plain `int` indices — WiThrottle's `'0' + id` character encoding lives
 in `WiThrottleBackend` and must not leak upward.
 
+**Two transports, chosen at runtime** (NVS `orch/transport`, not Kconfig): WiThrottle to
+JMRI, or the layout orchestrator's WebSocket control plane. Only the selected one's network
+stack is started. Orchestrator payloads are parsed with **cJSON and refused when malformed**
+— never substring search, because a half-parsed frame becomes a speed command on real track.
+
 **Pattern:**
 ```cpp
 // Application layer - owns state

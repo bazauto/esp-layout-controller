@@ -167,6 +167,8 @@ private:
     void updateUI();
     void sendSpeedCommand(int throttleId, int speed);
     void sendDirectionCommand(int throttleId, bool forward);
+    /** Used whenever both change at once — see ThrottleBackend for why. */
+    void sendSpeedAndDirectionCommand(int throttleId, int speed, bool forward);
     std::unique_ptr<Locomotive> createLocomotiveFromRoster(const ThrottleBackend::RosterEntry& rosterEntry);
 
     // Backend callback handlers

@@ -17,11 +17,23 @@ The ESP32-S3 is dual-core. LVGL rendering runs on a dedicated task; network I/O 
 | `jmri_reconnect` | 3 KB | 4 | Monitor connections, exponential backoff | `JmriConnectionController::enableAutoReconnect()` |
 | `rotary_enc` | 3 KB | 4 | I2C encoder polling every 100 ms | `RotaryEncoderHal::startPollingTask()` |
 | `throttle_poll` | 4 KB | 3 | Refresh speed/direction every 10 s, for allocated throttles only | `ThrottleController::initialize()` |
+| `orch_connect` | 6 KB | 5 | Wait for WiFi → orchestrator login → fetch roster | `AppController::startOrchestratorConnectTask()` |
+| `orch_ui_conn` | 6 KB | 5 | Same, triggered by the config screen's Connect button | `OrchestratorConfigScreen::onConnectClicked()` |
+| `websocket_task` | 6 KB | — | Orchestrator control-plane receive loop (owned by `esp_websocket_client`) | `OrchestratorClient::connect()` |
 
 `throttle_poll` is created **only when the active `ThrottleBackend` reports
 `requiresPolling()`**. WiThrottle does, because it answers queries rather than volunteering
-state; a transport that pushes changes unprompted gets no polling task at all, and its 4 KB
-stack is never allocated.
+state; the orchestrator pushes `LOCO_STATE` unprompted, so under that transport no polling
+task is created at all and its 4 KB stack is never allocated.
+
+**Only the selected transport's tasks run.** `AppController::initialise()` reads
+`TransportSettings` before anything connects: under WiThrottle the `jmri_*` tasks start and
+no orchestrator task does; under the orchestrator, `orch_connect` starts and JMRI
+auto-connect is never begun. Nothing sits retrying a server the operator has not chosen.
+
+`orch_connect` and `orch_ui_conn` both exist because the orchestrator login is a **blocking
+HTTP round trip** and the roster is two more. None of that may happen on the LVGL task
+(F-05). Both are one-shot: they delete themselves when done.
 
 ---
 

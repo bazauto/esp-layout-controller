@@ -52,6 +52,105 @@ negative indices.
 
 ---
 
+## OrchestratorClient
+
+**File:** `main/communication/OrchestratorClient.cpp/h`
+
+### Purpose
+
+Speaks the layout orchestrator's WebSocket control plane — the `ClientMessage` /
+`ServerMessage` vocabulary defined in `bazauto/layout-orchestration` →
+`packages/backend/src/domain/types.ts`, which is authoritative for this firmware.
+
+**MQTT is not this device's transport.** MQTT is the hardware telemetry bus for the sensor
+and point boards; this is an operator device and the WebSocket is the operator control plane.
+
+### Connecting is two steps
+
+The orchestrator authenticates with a session cookie, not a bearer token:
+
+1. `POST /api/auth/login` with the credentials; capture the session token from the
+   `Set-Cookie` response header.
+2. Open `/ws` with that token sent back as a `Cookie` request header
+   (`esp_websocket_client_config_t::headers`).
+
+Auth is enforced only at the upgrade. Once the socket is open nothing tears it down for an
+auth reason — deliberate on the server side, so a session expiring never drops a connection
+while a train is moving.
+
+The login is **blocking**, so it never runs on the LVGL task (F-05). See
+[THREADING_MODEL.md](../architecture/THREADING_MODEL.md) for `orch_connect`.
+
+### Messages handled
+
+| Inbound | Effect |
+|---------|--------|
+| `STATE_SNAPSHOT` | Applies every loco's state and the system status. **Display only** — never replayed outward as a command. |
+| `LOCO_STATE` | One loco's speed, direction and functions. |
+| `SYSTEM_STATUS` | Online / safe-stop / offline, with reason. |
+| `HEARTBEAT` | Liveness timestamp only (`secondsSinceLastMessage()`). |
+| `ERROR` | Logged; the orchestrator refused a command. |
+
+Blocks, points, routes, sensors and faults are real messages this device has no use for.
+They are ignored, not treated as errors.
+
+| Outbound | When |
+|----------|------|
+| `THROTTLE_COMMAND` | Speed **and** direction together — the contract has no speed-only command. |
+| `FUNCTION_COMMAND` | One function toggled. |
+| `EMERGENCY_STOP` | No payload, and no loco address: it halts the layout, not a loco. |
+
+### Parsing refuses rather than guesses
+
+Parsed with cJSON, not by substring search. This is the difference `CLAUDE.md` calls out
+against `JmriJsonClient`: a malformed orchestrator payload must be **rejected outright**,
+because the half that survived a partial parse would become a speed command on real track.
+
+Refused, each with a log line and no callback:
+
+- unparseable JSON, or a frame with no `type`
+- a `LOCO_STATE` with a missing or non-positive address
+- a speed that is absent, non-numeric, **non-integral** (cJSON reports every number as a
+  double, so `64.7` would otherwise truncate into a speed), or outside 0–126
+- a direction that is not `fwd`, `rev` or `stop`
+- a system status that is not `online`, `safe-stop` or `offline`
+
+Within a `STATE_SNAPSHOT`, one bad loco entry is skipped without costing the rest.
+
+### Roster
+
+A REST read (`GET /api/layouts/{id}/locos`), not a control-plane message: the snapshot
+carries loco state keyed by address but no names. The layout id comes from `GET /api/layouts`.
+Built aside and swapped in, so a partly-built roster is never visible to the carousel.
+
+---
+
+## OrchestratorBackend
+
+**File:** `main/communication/OrchestratorBackend.cpp/h`
+
+Adapts `OrchestratorClient` to the `ThrottleBackend` port. Capabilities:
+
+| Query | Answer | Why |
+|-------|--------|-----|
+| `requiresAcquisition()` | **false** | No sessions; commands name a loco address outright |
+| `providesRoster()` | true | Over REST, as above |
+| `providesFunctionLabels()` | **false** | The `locos` table stores none yet, so the UI shows `F0`…`F28` |
+| `requiresPolling()` | **false** | State arrives unprompted, so no `throttle_poll` task |
+
+Because the orchestrator has no sessions, the throttle-to-loco mapping that WiThrottle keeps
+server-side is kept **here** instead, and "acquire" is local bookkeeping rather than a
+handshake. The adapter also shadows each throttle's last commanded speed and direction,
+because `THROTTLE_COMMAND` carries both together and a caller changing one still has to
+supply the other.
+
+**Release sends nothing.** There is no session to hand back, and this device is not the only
+thing that can drive that loco — an automation run or another operator may be in charge of
+it. Stopping it because one throttle stopped displaying it would be a movement nobody
+commanded.
+
+---
+
 ## WiFiManager
 
 **File:** `main/communication/WiFiManager.cpp/h`

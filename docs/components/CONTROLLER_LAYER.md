@@ -15,6 +15,32 @@ Singleton (Meyer's pattern) that owns all shared services and manages screen lif
 | `m_wifiController` | `unique_ptr<WiFiController>` | WiFi lifecycle |
 | `m_wiThrottleClient` | `unique_ptr<WiThrottleClient>` | WiThrottle protocol |
 | `m_throttleBackend` | `unique_ptr<ThrottleBackend>` | The transport in use — held as the port, not the concrete adapter |
+| `m_orchestratorClient` | `unique_ptr<OrchestratorClient>` | Null unless the orchestrator is the selected transport |
+
+### Transport selection
+
+`initialise()` reads `TransportSettings` **before anything connects**, because the choice
+decides which network stack comes up at all:
+
+| Selected | Started | Not started |
+|----------|---------|-------------|
+| WiThrottle (default) | `WiThrottleBackend`, JMRI auto-connect | No orchestrator client is even constructed |
+| Orchestrator | `OrchestratorClient` + `OrchestratorBackend`, `orch_connect` task | JMRI auto-connect never begins |
+
+The backend is chosen once and never swapped on a live `ThrottleController` — doing so would
+strand locos mid-command — so a transport change takes effect on restart.
+
+---
+
+## TransportSettings
+
+**File:** `main/controller/TransportSettings.cpp/h`
+
+Plain settings struct over NVS namespace `orch`: the transport choice plus the orchestrator's
+host, port and `operator` credential. See
+[NVS_STORAGE.md](../architecture/NVS_STORAGE.md) for the key map and the two deliberate
+fallbacks to WiThrottle (an unrecognised stored value, and the orchestrator selected but not
+configured).
 | `m_jmriJsonClient` | `unique_ptr<JmriJsonClient>` | JSON WebSocket |
 | `m_jmriConnectionController` | `unique_ptr<JmriConnectionController>` | Auto-connect + reconnect |
 | `m_throttleController` | `unique_ptr<ThrottleController>` | Throttle/knob state |

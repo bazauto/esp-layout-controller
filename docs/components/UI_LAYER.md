@@ -99,6 +99,31 @@ All UI code uses LVGL (Light and Versatile Graphics Library). The UI layer holds
 
 **Navigation:** Back button → `show_main_screen()`
 
+**Transport selection:** a dropdown choosing WiThrottle or the layout orchestrator, plus an
+"Orchestrator Settings" button. The dropdown **refuses** to select the orchestrator until its
+host and credential are set, rather than saving a choice that would boot into a dead
+transport with every knob disabled. Changing it says plainly that a restart is needed —
+`AppController` picks the backend once, during `initialise()`.
+
+---
+
+### OrchestratorConfigScreen
+
+**File:** `main/ui/OrchestratorConfigScreen.cpp/h`
+
+**Purpose:** Layout orchestrator connection settings — host, port, and the `operator`
+username and password. Its own screen rather than a section of the JMRI one: the two
+transports are peers, and this one needs four fields including a credential.
+
+The password field is masked on screen. It is still plaintext in NVS — the accepted F-18
+risk.
+
+**Connect flow:** Save & Connect writes NVS, then does the login and roster fetch **on its
+own task** (`orch_ui_conn`). The login is a blocking HTTP round trip; running it on the LVGL
+task would freeze every throttle at once (F-05).
+
+**Navigation:** Back button → `show_jmri_config_screen()`
+
 ---
 
 ## UI Components
@@ -190,3 +215,4 @@ C-linkage (`extern "C"`) functions that bridge `main.c` and inter-screen navigat
 | `main_screen_wrapper.cpp/h` | `init_app_controller()`, `show_main_screen()` | App init + main screen |
 | `wifi_config_wrapper.cpp/h` | `show_wifi_config_screen()`, `close_wifi_config_screen()`, `is_wifi_connected()` | WiFi settings |
 | `jmri_config_wrapper.cpp/h` | `show_jmri_config_screen()`, `jmri_auto_connect()` | JMRI settings |
+| `orchestrator_config_wrapper.cpp/h` | `show_orchestrator_config_screen()` | Orchestrator settings |

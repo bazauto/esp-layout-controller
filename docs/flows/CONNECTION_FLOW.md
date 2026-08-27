@@ -2,7 +2,70 @@
 
 ## Overview
 
-Three connections are established: WiFi, WiThrottle (TCP), and JMRI JSON (WebSocket). They have a dependency chain — each requires the previous to be up.
+WiFi comes up first, then **one** of two transports — whichever `TransportSettings` selects.
+The other's stack is never started, so the device does not sit retrying a server the operator
+did not choose.
+
+```mermaid
+flowchart LR
+    A["WiFi STA"] --> D{"orch/transport"}
+    D -->|"0 = WiThrottle"| B["WiThrottle\n(TCP :12090)"]
+    B -->|"PW message\ndiscovers web port"| C["JMRI JSON\n(WS :12080)"]
+    D -->|"1 = Orchestrator"| E["POST /api/auth/login\n(HTTP)"]
+    E -->|"Set-Cookie:\nlayout_session"| F["Control plane\n(WS /ws)"]
+    F --> G["GET /api/layouts/{id}/locos\n(roster)"]
+```
+
+---
+
+## Orchestrator Connection Sequence
+
+Two steps, because the orchestrator authenticates with a session cookie rather than a bearer
+token — and the browser-oriented cookie is what the WebSocket upgrade carries.
+
+```mermaid
+sequenceDiagram
+    participant AC as AppController
+    participant OT as orch_connect task
+    participant OC as OrchestratorClient
+    participant ORCH as Orchestrator
+    participant OB as OrchestratorBackend
+    participant TC as ThrottleController
+
+    AC->>AC: TransportSettings::load()
+    Note over AC: Orchestrator selected,<br/>so JMRI auto-connect is skipped
+    AC->>OT: startOrchestratorConnectTask()
+    OT->>OT: wait for WiFi (up to 30 s)
+
+    OT->>OC: connect(host, port, user, pass)
+    OC->>ORCH: POST /api/auth/login
+    ORCH-->>OC: 200 + Set-Cookie: layout_session=...
+    OC->>ORCH: GET /ws (Cookie: layout_session=...)
+    ORCH-->>OC: 101 Switching Protocols
+    OC->>OC: state = CONNECTED
+
+    ORCH-->>OC: STATE_SNAPSHOT
+    Note over OC: Display only.<br/>Never replayed outward as a command.
+    OC->>OB: LocoState per loco
+    OB->>TC: ThrottleUpdate (matching throttles only)
+
+    OT->>OC: refreshRoster()
+    OC->>ORCH: GET /api/layouts
+    OC->>ORCH: GET /api/layouts/{id}/locos
+    ORCH-->>OC: roster
+    Note over OT: task deletes itself
+
+    loop while connected
+        ORCH-->>OC: LOCO_STATE / SYSTEM_STATUS / HEARTBEAT
+        OC->>OB: parsed, or refused outright
+    end
+```
+
+---
+
+## WiThrottle Connection Sequence
+
+The original path, unchanged. Used when `orch/transport` is `0` (the default).
 
 ```mermaid
 flowchart LR
