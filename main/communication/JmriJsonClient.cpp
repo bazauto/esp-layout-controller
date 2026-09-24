@@ -39,12 +39,26 @@ namespace {
 
 static const char* TAG = "JmriJsonClient";
 
+static constexpr uint32_t HEARTBEAT_INTERVAL_MS = 30000;
+
+// ESP_LOG, a std::string and a WebSocket send: 2 KB was tight for that, and a
+// stack overflow shows up as corruption rather than as an error. Pending the
+// measured figures F-33 asks for.
+static constexpr uint32_t HEARTBEAT_STACK_BYTES = 3072;
+
+// The heartbeat's send times out after 1 s, so a task that has not exited by
+// then plus a margin is not going to.
+static constexpr uint32_t HEARTBEAT_EXIT_WAIT_MS = 3000;
+
 JmriJsonClient::JmriJsonClient()
     : m_state(ConnectionState::DISCONNECTED)
     , m_client(nullptr)
     , m_serverHost("")
     , m_serverPort(12080)
     , m_heartbeatTask(nullptr)
+    , m_heartbeatMutex(nullptr)
+    , m_heartbeatExitSemaphore(nullptr)
+    , m_heartbeatRunning(false)
     , m_configuredPowerName("DCC++")
     , m_powerMutex(nullptr)
     , m_powerCallback(nullptr)
@@ -53,6 +67,11 @@ JmriJsonClient::JmriJsonClient()
     m_powerMutex = xSemaphoreCreateMutex();
     if (!m_powerMutex) {
         ESP_LOGE(TAG, "Failed to create power mutex");
+    }
+    m_heartbeatMutex = xSemaphoreCreateMutex();
+    m_heartbeatExitSemaphore = xSemaphoreCreateBinary();
+    if (!m_heartbeatMutex || !m_heartbeatExitSemaphore) {
+        ESP_LOGE(TAG, "Failed to create heartbeat synchronisation");
     }
 }
 
@@ -63,6 +82,14 @@ JmriJsonClient::~JmriJsonClient()
     if (m_powerMutex) {
         vSemaphoreDelete(m_powerMutex);
         m_powerMutex = nullptr;
+    }
+    if (m_heartbeatMutex) {
+        vSemaphoreDelete(m_heartbeatMutex);
+        m_heartbeatMutex = nullptr;
+    }
+    if (m_heartbeatExitSemaphore) {
+        vSemaphoreDelete(m_heartbeatExitSemaphore);
+        m_heartbeatExitSemaphore = nullptr;
     }
 }
 
@@ -397,36 +424,63 @@ esp_err_t JmriJsonClient::sendJsonCommand(const std::string& type, const std::st
 
 void JmriJsonClient::startHeartbeat()
 {
-    // Don't start if already running
-    if (m_heartbeatTask != nullptr) {
+    if (!m_heartbeatMutex || xSemaphoreTake(m_heartbeatMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGW(TAG, "Could not lock to start the heartbeat");
         return;
     }
-    
-    // Create heartbeat task
-    BaseType_t result = xTaskCreate(
-        heartbeatTask,
-        "jmri_heartbeat",
-        2048,
-        this,
-        5,
-        &m_heartbeatTask
-    );
-    
-    if (result == pdPASS) {
-        ESP_LOGI(TAG, "Heartbeat task started");
-    } else {
-        ESP_LOGE(TAG, "Failed to create heartbeat task");
-        m_heartbeatTask = nullptr;
+
+    // Don't start if already running
+    if (m_heartbeatTask == nullptr) {
+        // Only a stop that timed out can have left a stale signal here.
+        if (m_heartbeatExitSemaphore) {
+            xSemaphoreTake(m_heartbeatExitSemaphore, 0);
+        }
+        m_heartbeatRunning = true;
+        BaseType_t result = xTaskCreate(heartbeatTask, "jmri_heartbeat", HEARTBEAT_STACK_BYTES,
+                                        this, 5, &m_heartbeatTask);
+        if (result == pdPASS) {
+            ESP_LOGI(TAG, "Heartbeat task started");
+        } else {
+            ESP_LOGE(TAG, "Failed to create heartbeat task");
+            m_heartbeatTask = nullptr;
+            m_heartbeatRunning = false;
+        }
     }
+
+    xSemaphoreGive(m_heartbeatMutex);
 }
 
 void JmriJsonClient::stopHeartbeat()
 {
-    if (m_heartbeatTask != nullptr) {
-        ESP_LOGI(TAG, "Stopping heartbeat task");
-        vTaskDelete(m_heartbeatTask);
-        m_heartbeatTask = nullptr;
+    if (!m_heartbeatMutex || xSemaphoreTake(m_heartbeatMutex, pdMS_TO_TICKS(HEARTBEAT_EXIT_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Could not lock to stop the heartbeat");
+        return;
     }
+
+    TaskHandle_t task = m_heartbeatTask;
+    m_heartbeatTask = nullptr;
+
+    if (task != nullptr) {
+        ESP_LOGI(TAG, "Stopping heartbeat task");
+        m_heartbeatRunning = false;
+        // Safe even if the task is already on its way out: it suspends itself
+        // rather than exiting, so its handle stays valid until deleted below.
+        xTaskNotifyGive(task);
+
+        // Join, then delete. Deleting it from outside without waiting -- as
+        // this did -- could kill it mid-send while it held the WebSocket
+        // client's lock, leaving that lock held for good (F-31).
+        if (m_heartbeatExitSemaphore &&
+            xSemaphoreTake(m_heartbeatExitSemaphore, pdMS_TO_TICKS(HEARTBEAT_EXIT_WAIT_MS)) == pdTRUE) {
+            vTaskDelete(task);
+        } else {
+            // Leave it rather than delete it mid-send; it exits and suspends
+            // on its own once the send returns.
+            ESP_LOGE(TAG, "Heartbeat task did not exit in time; leaving it to finish");
+        }
+    }
+
+    xSemaphoreGive(m_heartbeatMutex);
 }
 
 void JmriJsonClient::heartbeatTask(void* pvParameters)
@@ -435,9 +489,12 @@ void JmriJsonClient::heartbeatTask(void* pvParameters)
     
     ESP_LOGI(TAG, "Heartbeat task running");
     
-    while (true) {
-        // Wait 30 seconds
-        vTaskDelay(pdMS_TO_TICKS(30000));
+    while (client->m_heartbeatRunning) {
+        // Sleeps for the interval, or until stopHeartbeat() wakes it to exit.
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS));
+        if (!client->m_heartbeatRunning) {
+            break;
+        }
         
         // Send heartbeat if connected
         if (client->isConnected()) {
@@ -445,4 +502,11 @@ void JmriJsonClient::heartbeatTask(void* pvParameters)
             client->sendHeartbeat();
         }
     }
+
+    // Signal, then wait to be deleted. stopHeartbeat() deletes this task only
+    // once it has seen the signal, so never while it is inside a send.
+    if (client->m_heartbeatExitSemaphore) {
+        xSemaphoreGive(client->m_heartbeatExitSemaphore);
+    }
+    vTaskSuspend(nullptr);
 }

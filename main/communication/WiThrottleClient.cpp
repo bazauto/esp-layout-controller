@@ -1,14 +1,36 @@
 #include "WiThrottleClient.h"
 #include "esp_log.h"
+#include "esp_mac.h"
+#include "esp_timer.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 static const char* TAG = "WiThrottleClient";
 
 // WiThrottle protocol commands
 static const char* CMD_HEARTBEAT = "*";
+static const char* CMD_HEARTBEAT_ON = "*+";
 static const char* CMD_TRACK_POWER = "PPA";  // Power command
+static const char* DEVICE_NAME = "ESP32-Layout-Controller";
+
+// The receive task wakes at least this often, which is what lets it notice a
+// requested shutdown and keep heartbeats on time without a task of their own.
+static constexpr int RX_TIMEOUT_S = 1;
+
+// Comfortably longer than one receive timeout plus a callback's worst-case wait
+// for the LVGL lock, so a teardown that gives up means the task is wedged.
+static constexpr int RX_EXIT_WAIT_MS = 3000;
+
+// A send takes microseconds; one holding the send mutex this long is stuck on a
+// peer that stopped reading, and teardown proceeds without waiting for it.
+static constexpr int SEND_LOCK_WAIT_MS = 500;
+
+// Longest heartbeat interval accepted from the server. Anything larger is taken
+// as malformed rather than as permission to go quiet for hours.
+static constexpr long MAX_HEARTBEAT_INTERVAL_S = 3600;
 
 WiThrottleClient::WiThrottleClient()
     : m_state(ConnectionState::DISCONNECTED)
@@ -28,6 +50,8 @@ WiThrottleClient::WiThrottleClient()
     , m_taskExitSemaphore(nullptr)
     , m_receiveTaskHandle(nullptr)
     , m_running(false)
+    , m_heartbeatPeriodMs(0)
+    , m_lastHeartbeatUs(0)
 {
     m_stateMutex = xSemaphoreCreateMutex();
     if (!m_stateMutex) {
@@ -72,6 +96,11 @@ esp_err_t WiThrottleClient::connect(const std::string& host, uint16_t port)
         ESP_LOGW(TAG, "Already connected or connecting");
         return ESP_ERR_INVALID_STATE;
     }
+
+    // When the server ends a session, its receive task exits but the socket is
+    // left open. Reap that here, before a new socket replaces it: overwriting it
+    // leaked one of lwIP's ten sockets per JMRI restart or WiFi drop (F-22).
+    teardownSession();
     
     m_serverHost = host;
     m_serverPort = port;
@@ -87,9 +116,9 @@ esp_err_t WiThrottleClient::connect(const std::string& host, uint16_t port)
         return ESP_FAIL;
     }
     
-    // Set socket timeout
+    // Receive timeout: see RX_TIMEOUT_S.
     struct timeval timeout;
-    timeout.tv_sec = 5;
+    timeout.tv_sec = RX_TIMEOUT_S;
     timeout.tv_usec = 0;
     setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     
@@ -122,52 +151,132 @@ esp_err_t WiThrottleClient::connect(const std::string& host, uint16_t port)
     ESP_LOGI(TAG, "Connected to WiThrottle server");
     setState(ConnectionState::CONNECTED);
     
-    // Send device name (identifies us to JMRI)
+    // Identify: HU first, a stable per-device id, so JMRI can recognise this
+    // device across reconnects; then the name shown in JMRI. The server answers
+    // N with its heartbeat interval, handled in handleHeartbeatAnnouncement.
     ESP_LOGI(TAG, "Sending device identification...");
-    sendCommand(std::string("N") + "ESP32-Layout-Controller");
-    
-    // Send hardware identifier
-    sendCommand(std::string("H") + "ESP32-S3");
+    sendCommand("HU" + deviceId());
+    sendCommand(std::string("N") + DEVICE_NAME);
     
     ESP_LOGI(TAG, "Waiting for server messages (version, roster, etc.)...");
-    
+
+    // Heartbeats are off until this session's server announces an interval.
+    m_heartbeatPeriodMs = 0;
+    m_lastHeartbeatUs = 0;
+
+    // Only a task that timed out on its way out can have left a stale signal
+    // here; clear it so the next teardown waits for the task it is stopping.
+    if (m_taskExitSemaphore) {
+        xSemaphoreTake(m_taskExitSemaphore, 0);
+    }
+
     // Start receive task
     m_running = true;
-    xTaskCreate(receiveTask, "withrottle_rx", 4096, this, 5, &m_receiveTaskHandle);
+    if (xTaskCreate(receiveTask, "withrottle_rx", 4096, this, 5, &m_receiveTaskHandle) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create receive task");
+        m_receiveTaskHandle = nullptr;
+        teardownSession();
+        setState(ConnectionState::FAILED);
+        return ESP_FAIL;
+    }
+
+    // A new session holds nothing, even when the UI still shows locos allocated
+    // from the last one. Without this, after a JMRI restart every throttle looks
+    // live while JMRI ignores its commands -- the stop press included (F-22).
+    reacquireLocomotives();
     
     return ESP_OK;
+}
+
+void WiThrottleClient::teardownSession()
+{
+    // Take the socket away from senders first, under the send mutex, so no new
+    // send() can start on it. Bounded: a send() stuck on a peer that stopped
+    // reading holds the mutex, and the shutdown() below is what frees it.
+    const bool haveSendLock =
+        m_sendMutex && xSemaphoreTake(m_sendMutex, pdMS_TO_TICKS(SEND_LOCK_WAIT_MS)) == pdTRUE;
+    const int sock = m_socket;
+    m_socket = -1;
+    if (haveSendLock) {
+        xSemaphoreGive(m_sendMutex);
+    }
+
+    if (sock < 0) {
+        return;
+    }
+
+    // Unblocks recv() -- the task reads from its own copy of the descriptor --
+    // and any send() still in flight.
+    m_running = false;
+    shutdown(sock, SHUT_RDWR);
+
+    bool exited = true;
+    if (m_receiveTaskHandle && m_taskExitSemaphore) {
+        exited = (xSemaphoreTake(m_taskExitSemaphore, pdMS_TO_TICKS(RX_EXIT_WAIT_MS)) == pdTRUE);
+        m_receiveTaskHandle = nullptr;
+    }
+
+    // If a send() was in flight, let it leave before the descriptor goes.
+    if (!haveSendLock && m_sendMutex &&
+        xSemaphoreTake(m_sendMutex, pdMS_TO_TICKS(SEND_LOCK_WAIT_MS)) == pdTRUE) {
+        xSemaphoreGive(m_sendMutex);
+    }
+
+    if (exited) {
+        close(sock);
+    } else {
+        // Closing now would free the descriptor for reuse while the task may
+        // still read from it -- and lwIP hands out the lowest free index, so
+        // the next socket opened would be the one it read. One leaked socket
+        // is the lesser harm, and only a wedged task gets here.
+        ESP_LOGE(TAG, "Receive task did not exit within %d ms; leaving socket %d open",
+                 RX_EXIT_WAIT_MS, sock);
+    }
+}
+
+void WiThrottleClient::reacquireLocomotives()
+{
+    std::vector<std::pair<char, ThrottleState>> held;
+    if (lockState(pdMS_TO_TICKS(100))) {
+        for (const auto& entry : m_throttleStates) {
+            if (entry.second.acquired) {
+                held.emplace_back(entry.first, entry.second);
+            }
+        }
+        unlockState();
+    } else {
+        ESP_LOGW(TAG, "Failed to lock state to re-acquire locos");
+        return;
+    }
+
+    for (const auto& entry : held) {
+        const char throttleId = entry.first;
+        const ThrottleState& state = entry.second;
+        const std::string address = std::string(1, state.addressType) + std::to_string(state.address);
+        ESP_LOGI(TAG, "Re-acquiring loco %s on throttle %c for the new session",
+                 address.c_str(), throttleId);
+        // JMRI answers with the loco's current speed and direction, which
+        // re-seeds the display for the new session.
+        sendCommand("M" + std::string(1, throttleId) + "+" + address + "<;>" + address);
+    }
 }
 
 void WiThrottleClient::disconnect()
 {
     if (m_socket >= 0) {
         ESP_LOGI(TAG, "Disconnecting from WiThrottle server");
-        m_running = false;
-        
-        // Unblock recv() by shutting down the socket read side
-        shutdown(m_socket, SHUT_RDWR);
-        
-        // Wait for receive task to exit cooperatively (up to 2 seconds)
-        if (m_receiveTaskHandle && m_taskExitSemaphore) {
-            if (xSemaphoreTake(m_taskExitSemaphore, pdMS_TO_TICKS(2000)) == pdTRUE) {
-                ESP_LOGI(TAG, "Receive task exited cleanly");
-            } else {
-                ESP_LOGW(TAG, "Receive task did not exit within timeout");
-            }
-            m_receiveTaskHandle = nullptr;
-        }
-        
-        close(m_socket);
-        m_socket = -1;
     }
+    teardownSession();
     
     setState(ConnectionState::DISCONNECTED);
     m_mainTrackPower = PowerState::UNKNOWN;
     m_progTrackPower = PowerState::UNKNOWN;
-    if (lockState(pdMS_TO_TICKS(50))) {
-        m_throttleStates.clear();
-        unlockState();
-    }
+
+    // The acquisition record is kept on purpose. It mirrors what the UI shows
+    // as allocated -- ThrottleController does not release on a disconnect --
+    // and the next connect() re-acquires from it. Clearing it here left the
+    // UI showing live throttles whose every command this client then refused.
+    // Only releaseLocomotive() removes an entry.
 }
 
 esp_err_t WiThrottleClient::setTrackPower(const std::string& track, bool on)
@@ -236,8 +345,18 @@ esp_err_t WiThrottleClient::acquireLocomotive(char throttleId, int address, bool
 
 esp_err_t WiThrottleClient::releaseLocomotive(char throttleId)
 {
+    // Forget the loco whether or not the release reaches the server. The
+    // record follows what the UI shows, and the UI has released it: keeping it
+    // would re-acquire, on the next session, a loco the operator let go (F-22).
+    if (lockState(pdMS_TO_TICKS(50))) {
+        m_throttleStates.erase(throttleId);
+        unlockState();
+    } else {
+        ESP_LOGW(TAG, "Failed to lock state for release tracking");
+    }
+
     if (!isConnected()) {
-        ESP_LOGW(TAG, "Not connected to server");
+        ESP_LOGW(TAG, "Not connected to server; release recorded locally only");
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -248,21 +367,7 @@ esp_err_t WiThrottleClient::releaseLocomotive(char throttleId)
     
     ESP_LOGI(TAG, "Releasing throttle %c", throttleId);
     
-    esp_err_t result = sendCommand(command);
-    
-    // Clear the throttle state
-    if (result == ESP_OK) {
-        if (lockState(pdMS_TO_TICKS(50))) {
-            m_throttleStates[throttleId].acquired = false;
-            m_throttleStates[throttleId].address = 0;
-            m_throttleStates[throttleId].addressType = 'S';
-            unlockState();
-        } else {
-            ESP_LOGW(TAG, "Failed to lock state for release tracking");
-        }
-    }
-    
-    return result;
+    return sendCommand(command);
 }
 
 esp_err_t WiThrottleClient::setSpeed(char throttleId, int speed)
@@ -515,9 +620,17 @@ void WiThrottleClient::receiveTask(void* arg)
     WiThrottleClient* client = static_cast<WiThrottleClient*>(arg);
     char buffer[512];
     std::string messageBuffer;
+
+    // This task's own copy. teardownSession() clears m_socket before closing,
+    // and must not be able to swap a different descriptor under a live recv().
+    const int sock = client->m_socket;
     
     while (client->m_running) {
-        int len = recv(client->m_socket, buffer, sizeof(buffer) - 1, 0);
+        // Every pass -- after data or after the one-second receive timeout --
+        // is a chance to send a heartbeat that has come due.
+        client->serviceHeartbeat();
+
+        int len = recv(sock, buffer, sizeof(buffer) - 1, 0);
         
         if (len < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -617,8 +730,8 @@ void WiThrottleClient::processMessage(const std::string& message)
             ESP_LOGD(TAG, "Heartbeat acknowledged");
             break;
             
-        case '*':  // Heartbeat request from server
-            sendHeartbeat();
+        case '*':  // Heartbeat interval, announced by the server after N
+            handleHeartbeatAnnouncement(message);
             break;
             
         case 'M':  // Multi-throttle (throttle state changes)
@@ -677,6 +790,58 @@ void WiThrottleClient::handlePowerMessage(const std::string& message)
     }
 }
 
+void WiThrottleClient::handleHeartbeatAnnouncement(const std::string& message)
+{
+    // "*<seconds>": how long JMRI will wait between messages before e-stopping
+    // this device's locos -- but only once monitoring is switched on with "*+".
+    // Never sending "*+" left the dead-man switch off, so a crashed, rebooted
+    // or half-open device left its locos running (F-23).
+    const char* digits = message.c_str() + 1;
+    char* end = nullptr;
+    const long seconds = std::strtol(digits, &end, 10);
+    if (end == digits || *end != '\0' || seconds < 0 || seconds > MAX_HEARTBEAT_INTERVAL_S) {
+        ESP_LOGW(TAG, "Ignoring malformed heartbeat announcement: %s", message.c_str());
+        return;
+    }
+
+    if (seconds == 0) {
+        ESP_LOGW(TAG, "Server has heartbeat monitoring disabled; no dead-man stop for this device");
+        m_heartbeatPeriodMs = 0;
+        return;
+    }
+
+    // Half the interval, so one late or lost heartbeat is not an e-stop.
+    m_heartbeatPeriodMs = static_cast<uint32_t>(seconds) * 500;
+    m_lastHeartbeatUs = esp_timer_get_time();
+    sendCommand(CMD_HEARTBEAT_ON);
+    ESP_LOGI(TAG, "Heartbeat monitoring on: server interval %lds, sending every %lu ms",
+             seconds, static_cast<unsigned long>(m_heartbeatPeriodMs));
+}
+
+void WiThrottleClient::serviceHeartbeat()
+{
+    if (m_heartbeatPeriodMs == 0) {
+        return;
+    }
+    const int64_t now = esp_timer_get_time();
+    if (now - m_lastHeartbeatUs >= static_cast<int64_t>(m_heartbeatPeriodMs) * 1000) {
+        m_lastHeartbeatUs = now;
+        sendHeartbeat();
+    }
+}
+
+std::string WiThrottleClient::deviceId()
+{
+    uint8_t mac[6] = {};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+        return "ESP32LC";
+    }
+    char id[13];
+    snprintf(id, sizeof(id), "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return std::string(id);
+}
+
 void WiThrottleClient::setState(ConnectionState newState)
 {
     if (m_state != newState) {
@@ -701,9 +866,20 @@ esp_err_t WiThrottleClient::sendCommand(const std::string& command)
         ESP_LOGW(TAG, "Failed to acquire send mutex");
         return ESP_ERR_TIMEOUT;
     }
+
+    // Re-read under the mutex: teardownSession() clears it under the same
+    // mutex before closing, so a descriptor read here is still open.
+    const int sock = m_socket;
+    if (sock < 0) {
+        if (m_sendMutex) {
+            xSemaphoreGive(m_sendMutex);
+        }
+        ESP_LOGW(TAG, "Cannot send command - session ended");
+        return ESP_ERR_INVALID_STATE;
+    }
     
     std::string fullCommand = command + "\n";
-    int len = send(m_socket, fullCommand.c_str(), fullCommand.length(), 0);
+    int len = send(sock, fullCommand.c_str(), fullCommand.length(), 0);
     
     if (m_sendMutex) {
         xSemaphoreGive(m_sendMutex);

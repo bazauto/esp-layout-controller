@@ -267,10 +267,32 @@ stateDiagram-v2
 | Method | Description |
 |--------|-------------|
 | `initialize()` | Prepare client state |
-| `connect(host, port=12090)` | TCP connect, send device ID, start receive task |
-| `disconnect()` | Close socket, stop tasks |
+| `connect(host, port=12090)` | Reap any previous session, TCP connect, send `HU<MAC>` and `N<name>`, start receive task, re-acquire every loco still on the record |
+| `disconnect()` | Stop the receive task and close the socket. Keeps the acquisition record |
 | `isConnected()` | Check connection state |
 | `sendHeartbeat()` | Send `*` keepalive |
+| `getHeartbeatPeriodMs()` | Heartbeat period this session, or 0 when the server does no monitoring |
+
+### Sessions and the acquisition record
+
+The client records every loco it acquires, per throttle. That record mirrors what the UI shows
+as allocated, not what the current TCP session holds, so it survives a disconnect of either
+kind: an explicit `disconnect()` or JMRI dropping the link. Every `connect()` re-acquires what
+is on it, and JMRI answers with each loco's speed and direction, which re-seeds the display.
+Only `releaseLocomotive()` removes an entry, whether or not the release reaches the server.
+
+This is F-22's fix. Before it, a JMRI restart left the UI showing every throttle live while
+the new session held nothing, so JMRI ignored the knob and the stop press alike; and the
+reconnect overwrote the old socket without closing it, leaking one of lwIP's ten sockets
+each time.
+
+### Heartbeat (dead-man switch)
+
+After `N`, JMRI announces its heartbeat interval as `*<seconds>`. A non-zero interval makes
+the client send `*+`, which switches monitoring on, and then `*` at half the interval from the
+receive task. If the heartbeats stop — the device crashed, rebooted, lost power or went
+half-open on WiFi — JMRI e-stops this device's locos. Never sending `*+` had left that switch
+off (F-23).
 
 ### API — Throttle Control
 
@@ -298,7 +320,11 @@ stateDiagram-v2
 
 ### Threading
 
-- `withrottle_rx` task (4 KB, priority 5): blocking `recv()` loop, parses messages, fires callbacks.
+- `withrottle_rx` task (4 KB, priority 5): `recv()` loop with a one-second timeout, so it
+  notices a requested shutdown promptly and sends heartbeats when due. Parses messages and
+  fires callbacks. It reads from its own copy of the descriptor; teardown clears `m_socket`
+  under the send mutex before closing, so neither a send nor the receive loop can land on a
+  descriptor lwIP has already handed to another socket.
 - `m_stateMutex`: protects internal `m_throttleStates` map.
 - All callbacks fire from the receive task — callers must handle their own locking.
 
@@ -314,7 +340,7 @@ stateDiagram-v2
 | `M<id>L` | `M0LL41<;>]\[Headlight]\[...` | Function labels |
 | `M<id>+` | `M0+L41<;>` | Loco added confirmation |
 | `M<id>-` | `M0-L41<;>` | Loco removed confirmation |
-| `*` | `*10` | Heartbeat interval |
+| `*` | `*10` | Heartbeat interval; non-zero arms monitoring with `*+` |
 
 ---
 
@@ -341,7 +367,7 @@ Same as WiThrottleClient: `DISCONNECTED → CONNECTING → CONNECTED / FAILED`.
 | `getPower()` | Request current power state |
 | `requestPowerList()` | Request all power managers |
 | `startHeartbeat()` | Spawn heartbeat task (ping every 30 s) |
-| `stopHeartbeat()` | Stop heartbeat task |
+| `stopHeartbeat()` | Stop heartbeat task and wait for it to exit (join, then delete). Up to about a second when the task is mid-send (F-31) |
 | `setConfiguredPowerName(name)` | Set power manager name (e.g. `"DCC++"`) |
 
 ### Callbacks

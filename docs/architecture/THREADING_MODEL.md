@@ -11,8 +11,8 @@ The ESP32-S3 is dual-core. LVGL rendering runs on a dedicated task; network I/O 
 | Task Name | Stack | Priority | Purpose | Creates |
 |-----------|-------|----------|---------|---------|
 | `LVGL timer` | 6 KB | 2 | LVGL rendering + event handling | `lvgl_port.c` |
-| `withrottle_rx` | 4 KB | 5 | WiThrottle TCP receive loop | `WiThrottleClient::connect()` |
-| `jmri_heartbeat` | 2 KB | 5 | JSON WebSocket ping every 30 s | `JmriJsonClient::startHeartbeat()` |
+| `withrottle_rx` | 4 KB | 5 | WiThrottle TCP receive loop; also sends the `*` heartbeat | `WiThrottleClient::connect()` |
+| `jmri_heartbeat` | 3 KB | 5 | JSON WebSocket ping every 30 s; stopped cooperatively, never deleted mid-send | `JmriJsonClient::startHeartbeat()` |
 | `jmri_autoconn` | 4 KB | 5 | Wait for WiFi → auto-connect JMRI | `JmriConnectionController::startAutoConnectTask()` |
 | `jmri_reconnect` | 3 KB | 4 | Monitor connections, exponential backoff | `JmriConnectionController::enableAutoReconnect()` |
 | `rotary_enc` | 3 KB | 4 | I2C encoder polling every 100 ms | `RotaryEncoderHal::startPollingTask()` |

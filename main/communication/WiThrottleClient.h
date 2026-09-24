@@ -269,9 +269,18 @@ public:
     
     /**
      * @brief Send heartbeat (keep-alive)
-     * Should be called periodically when connected
+     * Sent by the receive task at half the server's announced interval.
      */
     void sendHeartbeat();
+
+    /**
+     * @brief How often this session sends a heartbeat, or 0 when off.
+     *
+     * Half the interval the server announced with "*<seconds>". Non-zero means
+     * heartbeat monitoring was switched on with "*+", so JMRI e-stops this
+     * device's locos if the heartbeats stop (F-23).
+     */
+    uint32_t getHeartbeatPeriodMs() const { return m_heartbeatPeriodMs; }
 
 private:
     const std::vector<Locomotive>& getRoster() const { return m_roster; }
@@ -283,8 +292,26 @@ private:
     void handlePowerMessage(const std::string& message);
     void handleRosterMessage(const std::string& message);
     void handleThrottleMessage(const std::string& message);
+    void handleHeartbeatAnnouncement(const std::string& message);
     void setState(ConnectionState newState);
     esp_err_t sendCommand(const std::string& command);
+
+    /**
+     * @brief Stop the receive task and close the socket, if there is one.
+     *
+     * Deliberately leaves the acquisition record alone: that mirrors what the
+     * UI shows as allocated, and the next session re-acquires from it.
+     */
+    void teardownSession();
+
+    /** Re-acquires every loco the record holds, on a fresh session (F-22). */
+    void reacquireLocomotives();
+
+    /** Called by the receive task on every wake; sends "*" when one is due. */
+    void serviceHeartbeat();
+
+    /** Stable per-device id for the "HU" line: the WiFi station MAC. */
+    static std::string deviceId();
     
     static void receiveTask(void* arg);
     
@@ -322,4 +349,9 @@ private:
     
     TaskHandle_t m_receiveTaskHandle;
     bool m_running;
+
+    // Touched only by the receive task once it is running, and reset in
+    // connect() before it starts.
+    uint32_t m_heartbeatPeriodMs;
+    int64_t m_lastHeartbeatUs;
 };

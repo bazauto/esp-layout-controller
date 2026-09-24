@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <map>
 #include <functional>
@@ -7,6 +8,7 @@
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 /**
@@ -142,7 +144,11 @@ public:
     void startHeartbeat();
     
     /**
-     * @brief Stop heartbeat task
+     * @brief Stop heartbeat task, waiting for it to exit.
+     *
+     * Blocks for up to about a second when the task is mid-send. Called from
+     * the WebSocket task too, where that is the send timing out on the lock
+     * the WebSocket task itself holds while dispatching the event.
      */
     void stopHeartbeat();
 
@@ -167,8 +173,12 @@ private:
     std::string m_serverHost;
     uint16_t m_serverPort;
     
-    // Heartbeat task
+    // Heartbeat task. Started and stopped from both the WebSocket task and
+    // connect()/disconnect(), so the handle is guarded by m_heartbeatMutex.
     TaskHandle_t m_heartbeatTask;
+    SemaphoreHandle_t m_heartbeatMutex;
+    SemaphoreHandle_t m_heartbeatExitSemaphore;
+    std::atomic<bool> m_heartbeatRunning;
     
     // Configured power manager name to control and monitor
     std::string m_configuredPowerName;

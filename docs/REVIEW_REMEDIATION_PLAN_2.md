@@ -1,7 +1,7 @@
 # Review Remediation Plan — Second Pass
 
 **Created:** 2026-09-24
-**Status:** In progress — Batch 1 code done, awaiting its bench cycle
+**Status:** In progress — Batches 1 and 2 code done, awaiting their bench cycles
 **Source:** Static review of the whole firmware (`main/`, build config, CI), with the
 orchestrator-facing behaviour checked against `bazauto/layout-orchestration`. Nothing was
 flashed during the review: every "bench" criterion below is unverified until someone runs it
@@ -23,8 +23,8 @@ freeze while one is moving.
 | F-19 | [Unbounded encoder delta](#f-19-unbounded-encoder-delta) | HIGH | Small | 1 | Code done |
 | F-20 | [Orchestrator acquire starts from speed 0](#f-20-orchestrator-acquire-starts-from-speed-0) | HIGH | Medium | 1 | Code done |
 | F-21 | [Use-after-free on return to the main screen](#f-21-use-after-free-on-return-to-the-main-screen) | HIGH | Medium | 1 | Code done |
-| F-22 | [WiThrottle reconnect leaks a socket and loses the session](#f-22-withrottle-reconnect-leaks-a-socket-and-loses-the-session) | HIGH | Medium | 2 | Open |
-| F-23 | [WiThrottle heartbeat never armed](#f-23-withrottle-heartbeat-never-armed) | HIGH | Small | 2 | Open |
+| F-22 | [WiThrottle reconnect leaks a socket and loses the session](#f-22-withrottle-reconnect-leaks-a-socket-and-loses-the-session) | HIGH | Medium | 2 | Code done |
+| F-23 | [WiThrottle heartbeat never armed](#f-23-withrottle-heartbeat-never-armed) | HIGH | Small | 2 | Code done |
 | F-24 | [No automatic recovery after an ordinary outage](#f-24-no-automatic-recovery-after-an-ordinary-outage) | HIGH | Medium | 3 | Open |
 | F-25 | [Physical knobs not gated; optimistic update outlives a failed send](#f-25-physical-knobs-not-gated-optimistic-update-outlives-a-failed-send) | MEDIUM | Small | 4 | Open |
 | F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Open |
@@ -32,7 +32,7 @@ freeze while one is moving.
 | F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Open |
 | F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Open |
 | F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Slots: code done; sync: open |
-| F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Open |
+| F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Code done |
 | F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done |
 | F-33 | [Task stack headroom unmeasured](#f-33-task-stack-headroom-unmeasured) | MEDIUM | Small | 5 | Open |
 | F-34 | [JMRI config screen connect/disconnect faults](#f-34-jmri-config-screen-connectdisconnect-faults) | MEDIUM | Medium | 3 | Open |
@@ -238,6 +238,11 @@ whatever the command station last refreshed.
 
 #### Acceptance Criteria
 
+- [x] `connect()` reaps any previous socket and receive task before opening another; teardown
+      clears `m_socket` under the send mutex before closing, and the receive task reads its own
+      copy of the descriptor.
+- [x] The acquisition record survives a disconnect and is re-acquired on every new session;
+      only `releaseLocomotive()` removes an entry, even when disconnected.
 - [ ] Socket count is stable across ten JMRI restarts (lwIP stats or `socket()` fd numbers in
       the log).
 - [ ] After a JMRI restart the device re-acquires its locos without operator action.
@@ -267,8 +272,12 @@ off. The device also sends `HESP32-S3`, where the protocol expects `HU<unique-id
 
 #### Acceptance Criteria
 
-- [ ] `*+` is sent once per session when the server announces a non-zero interval.
-- [ ] `*` is sent at half the announced interval for the life of the session.
+- [x] `*+` is sent once per session when the server announces a non-zero interval.
+- [x] `*` is sent at half the announced interval for the life of the session, from the
+      receive task (which now wakes every second).
+- [x] `HU<station MAC>` replaces the malformed `HESP32-S3`.
+- [ ] Unit tests `test_withrottle_heartbeat_announcement_arms_monitoring` and
+      `test_withrottle_malformed_heartbeat_is_ignored` pass on the board (they compile).
 - [ ] Bench: pull the ESP's power with a loco running; JMRI e-stops it within the interval.
 
 ---
@@ -460,6 +469,15 @@ handle can be deleted twice. The task's stack is 2 KB with `ESP_LOG` in its path
 
 Cooperative shutdown with an exit signal, as F-02 did for the WiThrottle receive task, and a
 3 KB stack pending F-33's measurement.
+
+#### Acceptance Criteria
+
+- [x] The task is woken to exit by a notification, signals, and suspends itself;
+      `stopHeartbeat()` deletes it only after that signal, under a mutex that also guards
+      `startHeartbeat()`.
+- [x] Stack raised to 3 KB.
+- [ ] Bench: repeated JMRI JSON connect/disconnect (twenty cycles) with no hang and no heap
+      growth.
 
 ---
 

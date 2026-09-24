@@ -77,10 +77,45 @@ static void test_withrottle_send_returns_error_when_disconnected(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, client.releaseLocomotive('0'));
 }
 
+static void test_withrottle_heartbeat_announcement_arms_monitoring(void)
+{
+    WiThrottleClient client;
+    client.initialize();
+
+    // Off until the server announces an interval.
+    TEST_ASSERT_EQUAL_UINT32(0, client.getHeartbeatPeriodMs());
+
+    // "*10" arms the dead-man switch (F-23): heartbeats at half the interval,
+    // so one late or lost heartbeat is not an e-stop.
+    client.testProcessMessage("*10");
+    TEST_ASSERT_EQUAL_UINT32(5000, client.getHeartbeatPeriodMs());
+
+    // "*0" is the server saying it does no monitoring.
+    client.testProcessMessage("*0");
+    TEST_ASSERT_EQUAL_UINT32(0, client.getHeartbeatPeriodMs());
+}
+
+static void test_withrottle_malformed_heartbeat_is_ignored(void)
+{
+    WiThrottleClient client;
+    client.initialize();
+    client.testProcessMessage("*10");
+
+    // None of these may switch heartbeats off or stretch them out.
+    client.testProcessMessage("*");
+    client.testProcessMessage("*ten");
+    client.testProcessMessage("*10x");
+    client.testProcessMessage("*999999");
+    client.testProcessMessage("*-5");
+    TEST_ASSERT_EQUAL_UINT32(5000, client.getHeartbeatPeriodMs());
+}
+
 extern "C" void register_protocol_tests(void)
 {
     RUN_TEST(test_withrottle_roster_parsing);
     RUN_TEST(test_withrottle_throttle_update_parsing);
     RUN_TEST(test_jmri_power_parsing);
     RUN_TEST(test_withrottle_send_returns_error_when_disconnected);
+    RUN_TEST(test_withrottle_heartbeat_announcement_arms_monitoring);
+    RUN_TEST(test_withrottle_malformed_heartbeat_is_ignored);
 }
