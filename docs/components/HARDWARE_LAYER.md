@@ -32,7 +32,7 @@ HAL for 2× Adafruit I2C QT Rotary Encoders using the Seesaw protocol over I2C. 
 | `initialise()` | I2C scan, configure button pin as input + pullup |
 | `startPollingTask()` | Spawns `rotary_enc` FreeRTOS task |
 | `getStatus(index)` | Returns `EncoderStatus { address, present }` |
-| `setRotationCallback(fn)` | `fn(int knobId, int delta)` — called from polling task |
+| `setRotationCallback(fn)` | `fn(int knobId, int delta)` — called from polling task. A delta beyond ±`MAX_PLAUSIBLE_DELTA` (24) is dropped as a corrupted read and never reaches `fn` (F-19) |
 | `setPressCallback(fn)` | `fn(int knobId, bool pressed)` — edge-detected, called on press down only |
 
 ### Threading

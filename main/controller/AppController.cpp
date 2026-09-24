@@ -138,12 +138,18 @@ void AppController::showMainScreen()
 {
     initialise();
 
+    // Built once and re-shown, never rebuilt. Rebuilding destroyed the old
+    // screen from inside an LVGL handler, while an encoder or network task
+    // could already hold its pointer and be waiting on the LVGL lock to repaint
+    // it -- a use-after-free with trains running (F-21). It also leaked the
+    // whole LVGL tree each time, since lv_scr_load frees nothing (F-32).
     if (m_mainScreen) {
-        m_mainScreen.reset();
+        m_mainScreen->show();
+        return;
     }
 
     m_mainScreen = std::make_unique<MainScreen>();
-    m_mainScreen->create(m_wiThrottleClient.get(), m_jmriClient.get(), m_throttleController.get());
+    m_mainScreen->create(m_throttleController.get());
 }
 
 void AppController::showWiFiConfigScreen()

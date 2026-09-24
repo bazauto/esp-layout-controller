@@ -439,6 +439,9 @@ void OrchestratorClient::disconnect()
         m_sessionToken.clear();
     }
 
+    // What the layout told us is no longer current once we stop listening.
+    clearLocoStates();
+
     setState(ConnectionState::DISCONNECTED);
 }
 
@@ -463,6 +466,9 @@ void OrchestratorClient::websocketEventHandler(void* handlerArgs,
 
         case WEBSOCKET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Control plane disconnected");
+            // Stale from here on; the snapshot that opens the next connection
+            // refills it.
+            self->clearLocoStates();
             self->setState(ConnectionState::DISCONNECTED);
             break;
 
@@ -602,6 +608,10 @@ void OrchestratorClient::handleStateSnapshot(const void* payloadPtr)
         handleDccLink(dccLink);
     }
 
+    // The snapshot is the layout's whole belief, so a loco it does not mention
+    // is one it knows nothing about: nothing cached before it still stands.
+    clearLocoStates();
+
     // `locos` is an object keyed by address. This is the layout's belief about
     // what is already moving -- it updates what we display, and is never
     // replayed outward as a command.
@@ -669,6 +679,10 @@ void OrchestratorClient::handleLocoState(const void* payloadPtr)
             state.functions[static_cast<int>(number)] = cJSON_IsTrue(fn);
         }
     }
+
+    // Cached before dispatch, so a throttle taking this loco over from now on
+    // starts from this state even if it is not assigned anywhere yet (F-20).
+    cacheLocoState(state);
 
     LocoStateCallback callback;
     if (lockState(pdMS_TO_TICKS(50))) {
@@ -1143,6 +1157,80 @@ bool OrchestratorClient::getRosterEntry(int index, RosterEntry& outEntry) const
         unlockState();
     }
     return found;
+}
+
+// --- Last reported loco state ----------------------------------------------
+
+void OrchestratorClient::cacheLocoState(const LocoState& state)
+{
+    CachedLocoState cached;
+    cached.speed = state.speed;
+    cached.direction = state.direction;
+    for (const auto& fn : state.functions) {
+        // The parser admits F0-F28 only; checked again because a shift past
+        // 31 is undefined.
+        if (fn.first < 0 || fn.first > 28) {
+            continue;
+        }
+        const uint32_t bit = 1u << fn.first;
+        cached.functionsKnown |= bit;
+        if (fn.second) {
+            cached.functionsOn |= bit;
+        }
+    }
+
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Could not lock to cache state for loco %d", state.address);
+        return;
+    }
+    auto it = m_locoStates.find(state.address);
+    if (it != m_locoStates.end()) {
+        it->second = cached;
+    } else if (m_locoStates.size() < MAX_CACHED_LOCOS) {
+        m_locoStates.emplace(state.address, cached);
+    } else {
+        ESP_LOGW(TAG, "Loco state cache full; not caching loco %d", state.address);
+    }
+    unlockState();
+}
+
+void OrchestratorClient::clearLocoStates()
+{
+    if (lockState(pdMS_TO_TICKS(200))) {
+        m_locoStates.clear();
+        unlockState();
+    } else {
+        ESP_LOGW(TAG, "Could not lock to clear the loco state cache");
+    }
+}
+
+bool OrchestratorClient::getLastLocoState(int address, LocoState& outState) const
+{
+    CachedLocoState cached;
+    bool found = false;
+    if (lockState(pdMS_TO_TICKS(50))) {
+        auto it = m_locoStates.find(address);
+        if (it != m_locoStates.end()) {
+            cached = it->second;
+            found = true;
+        }
+        unlockState();
+    }
+    if (!found) {
+        return false;
+    }
+
+    outState = LocoState{};
+    outState.address = address;
+    outState.speed = cached.speed;
+    outState.direction = cached.direction;
+    for (int fn = 0; fn <= 28; ++fn) {
+        const uint32_t bit = 1u << fn;
+        if (cached.functionsKnown & bit) {
+            outState.functions[fn] = (cached.functionsOn & bit) != 0;
+        }
+    }
+    return true;
 }
 
 // --- Callbacks -------------------------------------------------------------

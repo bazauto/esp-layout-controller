@@ -14,8 +14,6 @@
 #include "components/FunctionPanel.h"
 #include "../model/Throttle.h"
 #include "../controller/ThrottleController.h"
-#include "../communication/WiThrottleClient.h"
-#include "../communication/JmriJsonClient.h"
 #include <array>
 #include <memory>
 
@@ -39,13 +37,23 @@ public:
     MainScreen& operator=(const MainScreen&) = delete;
     
     /**
-     * @brief Create and show the main screen
-     * @param wiThrottleClient WiThrottle client for DCC control
-     * @param jmriClient JMRI JSON client for power control
+     * @brief Build and show the main screen. Called once per boot.
+     *
+     * Takes the controller and nothing else: connection state, knob gating,
+     * functions and power all come through it, never from a concrete client.
+     *
      * @param throttleController Throttle controller (owned by application layer)
      * @return The LVGL screen object
      */
-    lv_obj_t* create(WiThrottleClient* wiThrottleClient, JmriJsonClient* jmriClient, ThrottleController* throttleController);
+    lv_obj_t* create(ThrottleController* throttleController);
+
+    /**
+     * @brief Show the already-built screen again and repaint it.
+     *
+     * The screen is kept for the life of the application rather than rebuilt
+     * on each return to it (F-21, F-32).
+     */
+    void show();
     
     /**
      * @brief Update throttle displays with current state
@@ -84,10 +92,6 @@ private:
     
     // Throttle controller (not owned - managed at application layer)
     ThrottleController* m_throttleController;
-    
-    // Client references (not owned)
-    WiThrottleClient* m_wiThrottleClient;
-    JmriJsonClient* m_jmriClient;
     
     // Throttle UI event handlers
     static void onKnobIndicatorTouched(lv_event_t* e);

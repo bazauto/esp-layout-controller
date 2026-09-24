@@ -1,7 +1,7 @@
 # Review Remediation Plan — Second Pass
 
 **Created:** 2026-09-24
-**Status:** In progress
+**Status:** In progress — Batch 1 code done, awaiting its bench cycle
 **Source:** Static review of the whole firmware (`main/`, build config, CI), with the
 orchestrator-facing behaviour checked against `bazauto/layout-orchestration`. Nothing was
 flashed during the review: every "bench" criterion below is unverified until someone runs it
@@ -20,9 +20,9 @@ freeze while one is moving.
 
 | ID | Finding | Severity | Effort | Batch | Status |
 |----|---------|----------|--------|-------|--------|
-| F-19 | [Unbounded encoder delta](#f-19-unbounded-encoder-delta) | HIGH | Small | 1 | Open |
-| F-20 | [Orchestrator acquire starts from speed 0](#f-20-orchestrator-acquire-starts-from-speed-0) | HIGH | Medium | 1 | Open |
-| F-21 | [Use-after-free on return to the main screen](#f-21-use-after-free-on-return-to-the-main-screen) | HIGH | Medium | 1 | Open |
+| F-19 | [Unbounded encoder delta](#f-19-unbounded-encoder-delta) | HIGH | Small | 1 | Code done |
+| F-20 | [Orchestrator acquire starts from speed 0](#f-20-orchestrator-acquire-starts-from-speed-0) | HIGH | Medium | 1 | Code done |
+| F-21 | [Use-after-free on return to the main screen](#f-21-use-after-free-on-return-to-the-main-screen) | HIGH | Medium | 1 | Code done |
 | F-22 | [WiThrottle reconnect leaks a socket and loses the session](#f-22-withrottle-reconnect-leaks-a-socket-and-loses-the-session) | HIGH | Medium | 2 | Open |
 | F-23 | [WiThrottle heartbeat never armed](#f-23-withrottle-heartbeat-never-armed) | HIGH | Small | 2 | Open |
 | F-24 | [No automatic recovery after an ordinary outage](#f-24-no-automatic-recovery-after-an-ordinary-outage) | HIGH | Medium | 3 | Open |
@@ -31,9 +31,9 @@ freeze while one is moving.
 | F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Open |
 | F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Open |
 | F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Open |
-| F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Open |
+| F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Slots: code done; sync: open |
 | F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Open |
-| F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Open |
+| F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done |
 | F-33 | [Task stack headroom unmeasured](#f-33-task-stack-headroom-unmeasured) | MEDIUM | Small | 5 | Open |
 | F-34 | [JMRI config screen connect/disconnect faults](#f-34-jmri-config-screen-connectdisconnect-faults) | MEDIUM | Medium | 3 | Open |
 | F-35 | [Orchestrator roster refused above ~35 locos](#f-35-orchestrator-roster-refused-above-35-locos) | MEDIUM | Small | 5 | Open |
@@ -107,10 +107,14 @@ as a delta.
 
 #### Acceptance Criteria
 
-- [ ] A delta beyond the plausibility bound never reaches the rotation callback.
-- [ ] `onKnobRotation(knob, INT_MAX)` is well-defined and moves the throttle by at most a
-      bounded amount.
-- [ ] `Knob::handleRotation` with a huge delta returns promptly with a valid index.
+- [x] A delta beyond the plausibility bound never reaches the rotation callback
+      (`RotaryEncoderHal::isPlausibleDelta`, ±24).
+- [x] `onKnobRotation(knob, INT_MIN)` is well-defined: the delta is clamped before the
+      multiply, and the result saturates at the end of the range.
+- [x] `Knob::handleRotation` with a huge delta returns at once with a valid index.
+- [ ] Unit tests `test_encoder_implausible_delta_is_refused`,
+      `test_controller_extreme_delta_is_well_defined` and
+      `test_knob_rotation_huge_delta_wraps_directly` pass on the board (they compile).
 - [ ] Bench: log raw deltas while spinning fast, and while unplugging an encoder mid-spin; no
       out-of-bound value reaches the controller.
 
@@ -147,10 +151,14 @@ WiThrottle does not have this problem: JMRI restates speed and direction after `
 
 #### Acceptance Criteria
 
-- [ ] Acquiring a loco the orchestrator already reports as moving shows its speed and
-      direction immediately.
-- [ ] The next knob click moves from that speed, not from 0.
-- [ ] Nothing is sent to the orchestrator on acquire.
+- [x] Acquiring a loco the orchestrator already reports as moving shows its speed and
+      direction immediately (replayed through the throttle-state callback).
+- [x] The next knob click moves from that speed, not from 0 — the controller's model and
+      the backend's shadow are both seeded.
+- [x] Nothing is sent to the orchestrator on acquire.
+- [ ] Unit tests `test_orch_backend_acquire_seeds_from_layout_state`,
+      `test_orch_backend_acquire_of_unreported_loco_shows_nothing` and
+      `test_orch_snapshot_replaces_cached_state` pass on the board (they compile).
 - [ ] Bench: drive a loco from the web UI, take it over on the device, click once each way.
 
 ---
@@ -189,8 +197,9 @@ no longer rebuilt on return, nothing would put it back. So:
 
 #### Acceptance Criteria
 
-- [ ] `MainScreen` is constructed once per boot.
-- [ ] No UI class calls `setConnectionStateCallback` on a client.
+- [x] `MainScreen` is constructed once per boot; `MainScreen::create` now takes only the
+      controller.
+- [x] No UI class calls `setConnectionStateCallback` on a client.
 - [ ] Knob gating still follows the WiThrottle link after visiting the JMRI screen and
       returning.
 - [ ] Bench: navigate Settings → Back twenty times while spinning a knob, on a build with

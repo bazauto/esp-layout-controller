@@ -56,6 +56,7 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
     , m_backButton(nullptr)
     , m_keyboard(nullptr)
     , m_keyboardLabel(nullptr)
+    , m_statusTimer(nullptr)
     , m_connectInProgress(false)
     , m_jsonClient(jsonClient)
     , m_wiThrottleClient(wiThrottleClient)
@@ -67,9 +68,25 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
 
 JmriConfigScreen::~JmriConfigScreen()
 {
-    // Deregister callbacks to prevent dangling this pointer
-    m_jsonClient.setConnectionStateCallback(nullptr);
-    m_wiThrottleClient.setConnectionStateCallback(nullptr);
+    stopStatusTimer();
+}
+
+void JmriConfigScreen::statusTimerCb(lv_timer_t* timer)
+{
+    // Runs on the LVGL task, so no lock is needed here.
+    // LVGL 8.4 has no lv_timer_get_user_data; the field is read directly.
+    auto* self = static_cast<JmriConfigScreen*>(timer->user_data);
+    if (self) {
+        self->updateStatus();
+    }
+}
+
+void JmriConfigScreen::stopStatusTimer()
+{
+    if (m_statusTimer) {
+        lv_timer_del(m_statusTimer);
+        m_statusTimer = nullptr;
+    }
 }
 
 lv_obj_t* JmriConfigScreen::create()
@@ -105,20 +122,11 @@ lv_obj_t* JmriConfigScreen::create()
     createButtonSection(buttonContainer);
     createKeyboard();
 
-    m_jsonClient.setConnectionStateCallback([this](JmriJsonClient::ConnectionState) {
-        if (lvgl_port_lock(100)) {
-            updateStatus();
-            lvgl_port_unlock();
-        }
-    });
+    // Polled, not registered on either client's connection callback: see
+    // statusTimerCb. Twice a second is plenty for two status labels.
+    stopStatusTimer();
+    m_statusTimer = lv_timer_create(statusTimerCb, 500, this);
 
-    m_wiThrottleClient.setConnectionStateCallback([this](WiThrottleClient::ConnectionState) {
-        if (lvgl_port_lock(100)) {
-            updateStatus();
-            lvgl_port_unlock();
-        }
-    });
-    
     // Load saved settings
     loadSettings();
     
@@ -612,8 +620,8 @@ void JmriConfigScreen::onBackButtonClicked(lv_event_t* e)
     // Hide keyboard if visible
     screen->hideKeyboard();
 
-    screen->m_jsonClient.setConnectionStateCallback(nullptr);
-    screen->m_wiThrottleClient.setConnectionStateCallback(nullptr);
+    // Stop the poll before the widgets go, or it paints a deleted label.
+    screen->stopStatusTimer();
     
     // Back to settings, which is where this screen is reached from.
     show_settings_screen();

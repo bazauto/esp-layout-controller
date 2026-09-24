@@ -373,6 +373,93 @@ static void test_orch_backend_release_sends_nothing(void)
     TEST_ASSERT_NOT_EQUAL(ESP_OK, backend.setSpeed(1, 10));
 }
 
+namespace {
+
+/** The layout already has 4472 running in reverse, headlight on. */
+const char* SNAPSHOT_WITH_4472_RUNNING =
+    "{\"type\":\"STATE_SNAPSHOT\",\"payload\":{"
+    "\"systemStatus\":\"online\","
+    "\"locos\":{"
+    "\"4472\":{\"address\":4472,\"speed\":60,\"direction\":\"rev\","
+    "\"functions\":{\"0\":true}}}}}";
+
+}  // namespace
+
+static void test_orch_backend_acquire_seeds_from_layout_state(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    std::vector<ThrottleBackend::ThrottleUpdate> updates;
+    backend.setThrottleStateCallback(
+        [&updates](const ThrottleBackend::ThrottleUpdate& u) { updates.push_back(u); });
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    // Not on any throttle yet, so nothing is displayed.
+    TEST_ASSERT_EQUAL_INT(0, (int)updates.size());
+
+    // Taking it over must start from what it is doing, not from stopped (F-20):
+    // otherwise the first click commands speed 4, or reverse, to a loco doing 60.
+    TEST_ASSERT_EQUAL(ESP_OK, backend.acquireLocomotive(1, 4472, true));
+
+    TEST_ASSERT_GREATER_THAN_INT(0, (int)updates.size());
+    TEST_ASSERT_EQUAL_INT(1, updates[0].throttleId);
+    TEST_ASSERT_EQUAL_INT(60, updates[0].speed);
+    TEST_ASSERT_EQUAL_INT(0, updates[0].direction);
+
+    bool sawHeadlight = false;
+    for (const auto& u : updates) {
+        if (u.function == 0 && u.functionState) {
+            sawHeadlight = true;
+        }
+    }
+    TEST_ASSERT_TRUE(sawHeadlight);
+}
+
+static void test_orch_backend_acquire_of_unreported_loco_shows_nothing(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    std::vector<ThrottleBackend::ThrottleUpdate> updates;
+    backend.setThrottleStateCallback(
+        [&updates](const ThrottleBackend::ThrottleUpdate& u) { updates.push_back(u); });
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    TEST_ASSERT_EQUAL(ESP_OK, backend.acquireLocomotive(0, 12, false));
+
+    // Nothing known about 12, so nothing is invented for it.
+    TEST_ASSERT_EQUAL_INT(0, (int)updates.size());
+}
+
+static void test_orch_snapshot_replaces_cached_state(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    OrchestratorClient::LocoState state;
+    TEST_ASSERT_TRUE(client.getLastLocoState(4472, state));
+    TEST_ASSERT_EQUAL_INT(60, state.speed);
+    TEST_ASSERT_TRUE(state.direction == OrchestratorClient::Direction::REVERSE);
+
+    // A later LOCO_STATE updates it...
+    client.testHandleMessage(
+        "{\"type\":\"LOCO_STATE\",\"payload\":"
+        "{\"address\":4472,\"speed\":20,\"direction\":\"fwd\"}}");
+    TEST_ASSERT_TRUE(client.getLastLocoState(4472, state));
+    TEST_ASSERT_EQUAL_INT(20, state.speed);
+
+    // ...and a snapshot that no longer mentions it means the layout knows
+    // nothing of it: the cached state must not outlive that.
+    client.testHandleMessage(
+        "{\"type\":\"STATE_SNAPSHOT\",\"payload\":{"
+        "\"systemStatus\":\"online\",\"locos\":{}}}");
+    TEST_ASSERT_FALSE(client.getLastLocoState(4472, state));
+}
+
 extern "C" void register_orchestrator_tests(void)
 {
     RUN_TEST(test_orch_cookie_extracted_from_set_cookie);
@@ -396,4 +483,7 @@ extern "C" void register_orchestrator_tests(void)
     RUN_TEST(test_orch_backend_refuses_commands_without_a_loco);
     RUN_TEST(test_orch_backend_routes_state_to_matching_throttle);
     RUN_TEST(test_orch_backend_release_sends_nothing);
+    RUN_TEST(test_orch_backend_acquire_seeds_from_layout_state);
+    RUN_TEST(test_orch_backend_acquire_of_unreported_loco_shows_nothing);
+    RUN_TEST(test_orch_snapshot_replaces_cached_state);
 }

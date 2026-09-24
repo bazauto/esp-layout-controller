@@ -70,16 +70,16 @@ void Knob::handleRotation(int delta, int rosterSize)
         return;
     }
     
-    // Update roster index with wrapping
-    m_rosterIndex += delta;
-    
-    // Wrap around
-    while (m_rosterIndex < 0) {
-        m_rosterIndex += rosterSize;
+    // Modular rather than repeated += / -=: a loop runs once per roster length
+    // of delta, which for a corrupted delta is millions of iterations with the
+    // controller's state mutex held (F-19). Reducing each term first also keeps
+    // the sum clear of overflow, and copes with a roster that shrank.
+    int index = (m_rosterIndex % rosterSize) + (delta % rosterSize);
+    index %= rosterSize;
+    if (index < 0) {
+        index += rosterSize;
     }
-    while (m_rosterIndex >= rosterSize) {
-        m_rosterIndex -= rosterSize;
-    }
+    m_rosterIndex = index;
     
     ESP_LOGD(TAG, "Knob %d roster index: %d (delta=%d)", m_id, m_rosterIndex, delta);
 }

@@ -2,6 +2,8 @@
 #include "Throttle.h"
 #include "Knob.h"
 
+#include <climits>
+
 static void test_throttle_assign_release(void)
 {
     Throttle throttle(1);
@@ -174,6 +176,25 @@ static void test_knob_rotation_ignored_when_no_roster(void)
     TEST_ASSERT_EQUAL(0, knob.getRosterIndex());
 }
 
+static void test_knob_rotation_huge_delta_wraps_directly(void)
+{
+    // A corrupted encoder read used to drive the wrap loop once per roster
+    // length of delta -- millions of iterations with the controller's state
+    // mutex held (F-19). Modular arithmetic answers at once, and in range.
+    Knob knob(1);
+    knob.assignToThrottle(0);
+
+    knob.handleRotation(INT_MAX, 7);
+    TEST_ASSERT_EQUAL(1, knob.getRosterIndex());    // INT_MAX % 7 == 1
+
+    knob.handleRotation(INT_MIN, 7);
+    TEST_ASSERT_EQUAL(6, knob.getRosterIndex());    // (1 + INT_MIN % 7) mod 7
+
+    // A roster that shrank since the last turn still lands in range.
+    knob.handleRotation(1, 4);
+    TEST_ASSERT_EQUAL(3, knob.getRosterIndex());    // (6 % 4 + 1) mod 4
+}
+
 void register_throttle_tests(void)
 {
     RUN_TEST(test_throttle_assign_release);
@@ -188,4 +209,5 @@ void register_throttle_tests(void)
     RUN_TEST(test_throttle_assign_loco_requires_selecting);
     RUN_TEST(test_knob_reassign_overwrites_previous);
     RUN_TEST(test_knob_rotation_ignored_when_no_roster);
+    RUN_TEST(test_knob_rotation_huge_delta_wraps_directly);
 }

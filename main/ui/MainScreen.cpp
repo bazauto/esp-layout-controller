@@ -29,46 +29,46 @@ MainScreen::MainScreen()
     , m_virtualEncoderPanel(nullptr)
 #endif
     , m_throttleController(nullptr)
-    , m_wiThrottleClient(nullptr)
-    , m_jmriClient(nullptr)
 {
     // Throttles are now managed by ThrottleController
 }
 
 MainScreen::~MainScreen()
 {
+    // Deregistering here is not enough to make destroying a MainScreen safe:
+    // a task that has already read the callback can still be waiting on the
+    // LVGL lock to call it. That is why AppController never destroys this
+    // screen (F-21). Kept so that a destruction at teardown is at least tidy.
     if (m_throttleController) {
         m_throttleController->setUIUpdateCallback(nullptr, nullptr);
     }
-    if (m_wiThrottleClient) {
-        m_wiThrottleClient->setConnectionStateCallback(nullptr);
-    }
 
-    // Don't delete LVGL objects here - LVGL manages screen lifecycle
-    // When lv_scr_load() is called with a new screen, LVGL will clean up the old one
-    // Our ThrottleMeter objects will be destroyed naturally with their parent containers
+    // lv_scr_load() does NOT free the screen it replaces, so LVGL objects built
+    // here are only freed by deleting m_screen. Nothing does, deliberately:
+    // this screen lives as long as the application (F-32).
 }
 
-lv_obj_t* MainScreen::create(WiThrottleClient* wiThrottleClient, JmriJsonClient* jmriClient, ThrottleController* throttleController)
+void MainScreen::show()
 {
-    m_wiThrottleClient = wiThrottleClient;
-    m_jmriClient = jmriClient;
+    if (!m_screen) {
+        return;
+    }
+    lv_scr_load(m_screen);
+    updateAllThrottles();
+}
+
+lv_obj_t* MainScreen::create(ThrottleController* throttleController)
+{
     m_throttleController = throttleController;  // Store reference (not owned)
-    
-    // Register UI update callback with the controller
+
+    // The one registration this screen needs. Link up/down reaches it through
+    // here too: the active backend owns the client's connection-state slot and
+    // routes it to ThrottleController::updateUI. Taking that slot from the UI,
+    // as this screen used to, silently cut the backend off from it.
     if (m_throttleController) {
         m_throttleController->setUIUpdateCallback(onUIUpdateNeeded, this);
     }
 
-    if (m_wiThrottleClient) {
-        m_wiThrottleClient->setConnectionStateCallback([this](WiThrottleClient::ConnectionState) {
-            if (lvgl_port_lock(100)) {
-                updateAllThrottles();
-                lvgl_port_unlock();
-            }
-        });
-    }
-    
     // Create a new screen or clean the current one
     m_screen = lv_obj_create(nullptr);
     

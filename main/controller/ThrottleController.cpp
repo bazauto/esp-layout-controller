@@ -8,6 +8,11 @@ static const char* TAG = "ThrottleController";
 static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 
+// No legitimate rotation needs more clicks than the whole speed range. The
+// encoder HAL already drops implausible reads; this is the last line before a
+// multiplication that would overflow (F-19).
+static constexpr int MAX_ROTATION_DELTA = 126;
+
 // The port validates throttle ids against its own bound, so a divergence here
 // would let an id this controller thinks is valid be refused by every backend.
 static_assert(ThrottleController::NUM_THROTTLES == ThrottleBackend::MAX_THROTTLES,
@@ -170,6 +175,9 @@ void ThrottleController::onKnobIndicatorTouched(int throttleId, int knobId)
 void ThrottleController::onKnobRotation(int knobId, int delta)
 {
     if (knobId < 0 || knobId >= NUM_KNOBS) return;
+
+    if (delta > MAX_ROTATION_DELTA) delta = MAX_ROTATION_DELTA;
+    if (delta < -MAX_ROTATION_DELTA) delta = -MAX_ROTATION_DELTA;
 
     if (!lockState(pdMS_TO_TICKS(50))) {
         ESP_LOGW(TAG, "Failed to lock state for knob rotation");

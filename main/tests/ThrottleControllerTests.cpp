@@ -2,6 +2,9 @@
 #include "ThrottleController.h"
 #include "ThrottleBackend.h"
 #include "Locomotive.h"
+#include "RotaryEncoderHal.h"
+
+#include <climits>
 
 namespace {
     struct UiCallbackState {
@@ -542,6 +545,41 @@ static void test_controller_hides_track_power_when_unsupported(void)
     TEST_ASSERT_EQUAL_INT(0, (int)backend.trackPowerWrites.size());
 }
 
+static void test_encoder_implausible_delta_is_refused(void)
+{
+    // The encoder HAL is what stops a corrupted read becoming a rotation
+    // (F-19); this is the bound it applies.
+    TEST_ASSERT_TRUE(RotaryEncoderHal::isPlausibleDelta(0));
+    TEST_ASSERT_TRUE(RotaryEncoderHal::isPlausibleDelta(RotaryEncoderHal::MAX_PLAUSIBLE_DELTA));
+    TEST_ASSERT_TRUE(RotaryEncoderHal::isPlausibleDelta(-RotaryEncoderHal::MAX_PLAUSIBLE_DELTA));
+    TEST_ASSERT_FALSE(RotaryEncoderHal::isPlausibleDelta(RotaryEncoderHal::MAX_PLAUSIBLE_DELTA + 1));
+    TEST_ASSERT_FALSE(RotaryEncoderHal::isPlausibleDelta(-RotaryEncoderHal::MAX_PLAUSIBLE_DELTA - 1));
+
+    // The shape the double-read workaround can produce after a failed read: a
+    // GPIO-bulk word with the button's pull-up (bit 24) set.
+    TEST_ASSERT_FALSE(RotaryEncoderHal::isPlausibleDelta(0x01000000));
+    TEST_ASSERT_FALSE(RotaryEncoderHal::isPlausibleDelta(INT32_MIN));
+}
+
+static void test_controller_extreme_delta_is_well_defined(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+
+    setupThrottleWithLoco(controller, 0, 0, "LocoX", 3);
+    Throttle* throttle = controller.getThrottle(0);
+    TEST_ASSERT_NOT_NULL(throttle);
+    throttle->setSpeed(0);
+
+    // Was signed overflow in delta * stepsPerClick (F-19). Now it saturates at
+    // the end of the range and sends exactly one command. Keeping such a delta
+    // from arriving at all is the encoder HAL's job, tested above.
+    controller.onKnobRotation(0, INT_MIN);
+
+    TEST_ASSERT_LESS_OR_EQUAL_INT(126, throttle->getCurrentSpeed());
+    TEST_ASSERT_EQUAL_INT(1, (int)(backend.speeds.size() + backend.pairedCommands.size()));
+}
+
 extern "C" void register_controller_tests(void)
 {
     RUN_TEST(test_controller_assign_knob_to_unallocated);
@@ -563,4 +601,6 @@ extern "C" void register_controller_tests(void)
     RUN_TEST(test_controller_reports_track_power_from_backend);
     RUN_TEST(test_controller_forwards_track_power_changes);
     RUN_TEST(test_controller_hides_track_power_when_unsupported);
+    RUN_TEST(test_encoder_implausible_delta_is_refused);
+    RUN_TEST(test_controller_extreme_delta_is_well_defined);
 }

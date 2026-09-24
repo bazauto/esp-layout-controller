@@ -101,7 +101,7 @@ The login is **blocking**, so it never runs on the LVGL task (F-05). See
 
 | Inbound | Effect |
 |---------|--------|
-| `STATE_SNAPSHOT` | Applies every loco's state and the system status. **Display only** — never replayed outward as a command. |
+| `STATE_SNAPSHOT` | Applies every loco's state and the system status, and replaces the per-loco state cache. **Display only** — never replayed outward as a command. |
 | `LOCO_STATE` | One loco's speed, direction and functions. |
 | `SYSTEM_STATUS` | Online / safe-stop / offline, with reason. |
 | `HEARTBEAT` | Liveness timestamp only (`secondsSinceLastMessage()`). |
@@ -186,6 +186,13 @@ server-side is kept **here** instead, and "acquire" is local bookkeeping rather 
 handshake. The adapter also shadows each throttle's last commanded speed and direction,
 because `THROTTLE_COMMAND` carries both together and a caller changing one still has to
 supply the other.
+
+**Acquire starts from what the loco is doing.** `OrchestratorClient` keeps each loco's last
+reported state (from the snapshot and every `LOCO_STATE`; emptied when the link drops), and
+acquiring replays it to the new throttle exactly as a `LOCO_STATE` would arrive. Taking over a
+loco another operator has at speed 60 therefore shows 60, and the next click moves from there
+— starting from zero made that click command speed 4, or a reversal (F-20). This is the
+display path only: nothing is sent on acquire.
 
 **Release sends nothing.** There is no session to hand back, and this device is not the only
 thing that can drive that loco — an automation run or another operator may be in charge of

@@ -58,15 +58,17 @@ the bottom. Every screen follows it.
 ```
 
 **Dependencies (raw pointers, not owned):**
-- `WiThrottleClient*`
-- `JmriJsonClient*`
-- `ThrottleController*`
+- `ThrottleController*` — and nothing else. Connection state, knob gating, functions and
+  power all come through it, never from a concrete client.
+
+**Lifetime:** built once per boot and re-shown with `show()`; never destroyed (F-21).
 
 **Key Methods:**
 
 | Method | Description |
 |--------|-------------|
-| `create(WT*, JC*, TC*)` | Build LVGL widget tree, register callbacks |
+| `create(TC*)` | Build LVGL widget tree, register the UI update callback. First show only |
+| `show()` | Re-load the existing screen and repaint it |
 | `updateThrottle(id)` | Refresh one throttle meter from snapshot |
 | `updateAllThrottles()` | Refresh all meters + roster carousel |
 

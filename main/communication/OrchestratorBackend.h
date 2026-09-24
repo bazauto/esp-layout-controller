@@ -88,6 +88,18 @@ private:
     /** Routes an incoming LocoState to whichever throttles hold that address. */
     void onLocoState(const OrchestratorClient::LocoState& state);
 
+    /**
+     * @brief Applies a LocoState to one throttle: shadow first, then display.
+     *
+     * Does nothing when the throttle no longer holds that address, so a state
+     * racing a release or a re-acquire cannot land on the wrong loco.
+     */
+    void publishToThrottle(int throttleId,
+                           const OrchestratorClient::LocoState& state,
+                           const ThrottleStateCallback& callback);
+
+    ThrottleStateCallback copyThrottleStateCallback() const;
+
     bool lock(TickType_t timeout) const;
     void unlock() const;
 

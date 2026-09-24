@@ -111,15 +111,36 @@ esp_err_t OrchestratorBackend::acquireLocomotive(int throttleId, int address, bo
         return ESP_ERR_TIMEOUT;
     }
     m_assignments[throttleId].address = address;
-    // Assume nothing about what the loco is doing. The next LOCO_STATE tells us,
-    // and until then these shadow values only matter if the operator commands
-    // something, which overwrites them anyway.
     m_assignments[throttleId].speed = 0;
     m_assignments[throttleId].forward = true;
     unlock();
 
     ESP_LOGI(TAG, "Throttle %d now drives loco %d (no handshake; the orchestrator has no sessions)",
              throttleId, address);
+
+    // The loco may already be moving -- another operator or an automation run
+    // may have it. Starting from zero would make the first click command
+    // speed 4 to a loco doing 60, or reverse it (F-20). So replay what the
+    // layout last reported, exactly as though that LOCO_STATE had just
+    // arrived. Display-side only: nothing is sent.
+    //
+    // The assignment is already in place, so any LOCO_STATE processed from here
+    // on also reaches this throttle. The second read catches one that landed
+    // between the first read and the publish, which would otherwise leave the
+    // older value on screen.
+    OrchestratorClient::LocoState known;
+    if (m_client && m_client->getLastLocoState(address, known)) {
+        const ThrottleStateCallback callback = copyThrottleStateCallback();
+        publishToThrottle(throttleId, known, callback);
+
+        OrchestratorClient::LocoState latest;
+        if (m_client->getLastLocoState(address, latest) &&
+            (latest.speed != known.speed || latest.direction != known.direction)) {
+            publishToThrottle(throttleId, latest, callback);
+        }
+    } else {
+        ESP_LOGI(TAG, "Layout has reported nothing for loco %d; starting from stopped", address);
+    }
     return ESP_OK;
 }
 
@@ -280,7 +301,7 @@ bool OrchestratorBackend::getRosterEntry(int index, RosterEntry& outEntry) const
     return true;
 }
 
-void OrchestratorBackend::onLocoState(const OrchestratorClient::LocoState& state)
+OrchestratorBackend::ThrottleStateCallback OrchestratorBackend::copyThrottleStateCallback() const
 {
     ThrottleStateCallback callback;
     if (lock(pdMS_TO_TICKS(50))) {
@@ -289,58 +310,71 @@ void OrchestratorBackend::onLocoState(const OrchestratorClient::LocoState& state
     } else {
         callback = m_throttleStateCallback;
     }
+    return callback;
+}
 
-    if (!callback) {
-        return;
-    }
+void OrchestratorBackend::onLocoState(const OrchestratorClient::LocoState& state)
+{
+    const ThrottleStateCallback callback = copyThrottleStateCallback();
 
     // A loco can legitimately sit on more than one of this device's throttles,
     // so this is a loop rather than a lookup that stops at the first match.
     for (int throttleId = 0; throttleId < MAX_THROTTLES; ++throttleId) {
-        int address = 0;
-        if (lock(pdMS_TO_TICKS(50))) {
-            address = m_assignments[throttleId].address;
-            if (address == state.address) {
-                // Keep the shadow in step, so a later speed-only change is
-                // paired with the direction the layout actually has.
-                m_assignments[throttleId].speed = state.speed;
-                if (state.direction != OrchestratorClient::Direction::STOP) {
-                    m_assignments[throttleId].forward =
-                        (state.direction == OrchestratorClient::Direction::FORWARD);
-                }
+        publishToThrottle(throttleId, state, callback);
+    }
+}
+
+void OrchestratorBackend::publishToThrottle(int throttleId,
+                                            const OrchestratorClient::LocoState& state,
+                                            const ThrottleStateCallback& callback)
+{
+    if (!isValidThrottle(throttleId)) {
+        return;
+    }
+
+    bool holdsLoco = false;
+    if (lock(pdMS_TO_TICKS(50))) {
+        holdsLoco = (m_assignments[throttleId].address == state.address);
+        if (holdsLoco) {
+            // Keep the shadow in step, so a later speed-only change is paired
+            // with the direction the layout actually has.
+            m_assignments[throttleId].speed = state.speed;
+            if (state.direction != OrchestratorClient::Direction::STOP) {
+                m_assignments[throttleId].forward =
+                    (state.direction == OrchestratorClient::Direction::FORWARD);
             }
-            unlock();
         }
+        unlock();
+    }
 
-        if (address != state.address) {
-            continue;
-        }
+    if (!holdsLoco || !callback) {
+        return;
+    }
 
-        ThrottleUpdate update;
-        update.throttleId = throttleId;
-        update.address = state.address;
-        update.speed = state.speed;
+    ThrottleUpdate update;
+    update.throttleId = throttleId;
+    update.address = state.address;
+    update.speed = state.speed;
 
-        // 'stop' is not a heading, so it leaves the displayed direction alone
-        // rather than being flattened into "reverse".
-        switch (state.direction) {
-            case OrchestratorClient::Direction::FORWARD: update.direction = 1;  break;
-            case OrchestratorClient::Direction::REVERSE: update.direction = 0;  break;
-            case OrchestratorClient::Direction::STOP:
-            default:                                    update.direction = -1; break;
-        }
+    // 'stop' is not a heading, so it leaves the displayed direction alone
+    // rather than being flattened into "reverse".
+    switch (state.direction) {
+        case OrchestratorClient::Direction::FORWARD: update.direction = 1;  break;
+        case OrchestratorClient::Direction::REVERSE: update.direction = 0;  break;
+        case OrchestratorClient::Direction::STOP:
+        default:                                    update.direction = -1; break;
+    }
 
-        callback(update);
+    callback(update);
 
-        // Functions travel one per update, matching the port's shape.
-        for (const auto& fn : state.functions) {
-            ThrottleUpdate fnUpdate;
-            fnUpdate.throttleId = throttleId;
-            fnUpdate.address = state.address;
-            fnUpdate.function = fn.first;
-            fnUpdate.functionState = fn.second;
-            callback(fnUpdate);
-        }
+    // Functions travel one per update, matching the port's shape.
+    for (const auto& fn : state.functions) {
+        ThrottleUpdate fnUpdate;
+        fnUpdate.throttleId = throttleId;
+        fnUpdate.address = state.address;
+        fnUpdate.function = fn.first;
+        fnUpdate.functionState = fn.second;
+        callback(fnUpdate);
     }
 }
 

@@ -45,7 +45,7 @@ configured).
 | `m_jmriConnectionController` | `unique_ptr<JmriConnectionController>` | Auto-connect + reconnect |
 | `m_throttleController` | `unique_ptr<ThrottleController>` | Throttle/knob state |
 | `m_encoderHal` | `unique_ptr<RotaryEncoderHal>` | Encoder hardware |
-| `m_mainScreen` | `unique_ptr<MainScreen>` | Current main screen instance |
+| `m_mainScreen` | `unique_ptr<MainScreen>` | The main screen. Built on first show and kept for the life of the app: rebuilding it was a use-after-free (F-21) |
 | `m_settingsScreen` | `unique_ptr<SettingsScreen>` | Device settings. Rebuilt on each open, because which status rows it shows depends on the selected transport |
 
 ### Key Methods

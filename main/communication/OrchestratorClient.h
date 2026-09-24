@@ -176,6 +176,23 @@ public:
     size_t getRosterSize() const;
     bool getRosterEntry(int index, RosterEntry& outEntry) const;
 
+    // --- Last reported loco state -------------------------------------------
+
+    /**
+     * @brief The layout's last reported state for a loco, if any.
+     *
+     * Filled from STATE_SNAPSHOT (which replaces it wholesale) and LOCO_STATE,
+     * emptied when the link drops. Read when a throttle takes a loco over, so
+     * the display -- and the knob arithmetic that starts from it -- begins from
+     * what the loco is doing rather than from zero (F-20).
+     *
+     * Display-side only, like the snapshot it comes from: nothing read here is
+     * ever sent back out as a command.
+     *
+     * @return false when the layout has not reported that loco.
+     */
+    bool getLastLocoState(int address, LocoState& outState) const;
+
     // --- Notifications ----------------------------------------------------
 
     void setConnectionStateCallback(ConnectionStateCallback callback);
@@ -235,6 +252,26 @@ private:
     /** Cached so the roster fetch and the power POST can both reach it. */
     std::string getLayoutId();
 
+    /**
+     * @brief One loco's last reported state, kept compact.
+     *
+     * LocoState's function map costs a heap node per function; a pair of
+     * bitmasks holds F0-F28 in eight bytes.
+     */
+    struct CachedLocoState {
+        int speed = 0;
+        Direction direction = Direction::STOP;
+        uint32_t functionsKnown = 0;   ///< bit n set: Fn was reported
+        uint32_t functionsOn = 0;      ///< bit n set: Fn is on
+    };
+
+    /** Bounds the cache against a server reporting ever more addresses. */
+    static constexpr size_t MAX_CACHED_LOCOS = 128;
+
+    /** Records a validated LocoState. Takes the state mutex. */
+    void cacheLocoState(const LocoState& state);
+    void clearLocoStates();
+
     esp_err_t sendJson(const std::string& json);
 
     static void websocketEventHandler(void* handlerArgs,
@@ -259,6 +296,7 @@ private:
     TrackPower m_trackPower;
     std::string m_layoutId;
     std::vector<RosterEntry> m_roster;
+    std::map<int, CachedLocoState> m_locoStates;
     int64_t m_lastMessageUs;
 
     ConnectionStateCallback m_connectionCallback;

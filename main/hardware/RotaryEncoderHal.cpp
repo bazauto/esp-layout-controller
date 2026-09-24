@@ -107,7 +107,14 @@ void RotaryEncoderHal::pollOnce()
         int32_t deltaRaw = 0;
         bool deltaOk = readEncoderDelta(m_status[i].address, deltaRaw);
 
-        if (deltaOk) {
+        if (deltaOk && !isPlausibleDelta(deltaRaw)) {
+            // A corrupted word, not a rotation -- most likely a response to a
+            // different request after a failed transaction. Dropped as a
+            // failed read (F-19).
+            ESP_LOGW(TAG, "Encoder %d: discarding implausible delta %ld (0x%08lX)", i,
+                     static_cast<long>(deltaRaw),
+                     static_cast<unsigned long>(static_cast<uint32_t>(deltaRaw)));
+        } else if (deltaOk) {
             if (deltaRaw != 0 && m_rotationCallback) {
                 ESP_LOGD(TAG, "Encoder %d delta=%ld", i, static_cast<long>(deltaRaw));
                 m_rotationCallback(i, static_cast<int>(deltaRaw));
