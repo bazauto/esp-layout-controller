@@ -278,8 +278,10 @@ void WiFiConfigScreen::updateStatus()
             lv_label_set_text(m_statusLabel, "Status: Connection Failed");
             lv_label_set_text(m_ipLabel, "IP: Not connected");
             lv_obj_clear_state(m_connectButton, LV_STATE_DISABLED);  // Enable connect to retry
-            lv_obj_add_state(m_disconnectButton, LV_STATE_DISABLED);  // Disable disconnect when failed
-            lv_obj_add_state(m_forgetButton, LV_STATE_DISABLED);     // Disable forget when failed
+            // WiFiManager keeps retrying in the background after a failure
+            // (F-24), so these are how the operator stops it.
+            lv_obj_clear_state(m_disconnectButton, LV_STATE_DISABLED);
+            lv_obj_clear_state(m_forgetButton, LV_STATE_DISABLED);
             break;
     }
 }

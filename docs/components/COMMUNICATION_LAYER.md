@@ -216,9 +216,12 @@ stateDiagram-v2
     [*] --> DISCONNECTED
     DISCONNECTED --> CONNECTING : connect()
     CONNECTING --> CONNECTED : IP obtained
-    CONNECTING --> FAILED : Max retries (5)
+    CONNECTED --> CONNECTING : link lost (immediate retries)
+    CONNECTING --> FAILED : 5 immediate retries spent
+    FAILED --> CONNECTED : background retry succeeds
+    FAILED --> CONNECTING : connect()
     CONNECTED --> DISCONNECTED : disconnect()
-    FAILED --> CONNECTING : connect() retry
+    FAILED --> DISCONNECTED : disconnect() / forgetNetwork()
 ```
 
 ### API
@@ -227,8 +230,8 @@ stateDiagram-v2
 |--------|-------------|
 | `initialize()` | Init NVS, WiFi driver, event handlers |
 | `connect()` | Connect using stored NVS credentials |
-| `connect(ssid, password)` | Connect with explicit credentials, save to NVS on success |
-| `disconnect()` | Disconnect WiFi STA |
+| `connect(ssid, password)` | Connect with explicit credentials; saved to NVS only once they produce an IP (F-40) |
+| `disconnect()` | Disconnect WiFi STA and stop retrying |
 | `forgetNetwork()` | Erase NVS credentials |
 | `startScan()` | Trigger async AP scan |
 | `getScanResults()` | Return vector of discovered APs |
@@ -236,6 +239,18 @@ stateDiagram-v2
 | `getStoredSsid()` | Read SSID from NVS |
 | `getIpAddress()` | Current IP as string |
 | `setStateCallback(fn)` | `fn(State, string ip)` |
+
+### Reconnection
+
+After five immediate retries the state reports `FAILED`, but a one-shot `esp_timer` keeps
+retrying — 5 s, doubling, capped at a minute — until the operator disconnects or forgets the
+network (F-24). Giving up for good had meant a router reboot left the device offline, and
+every throttle dead, until someone went into settings. The timer callback does nothing but
+call `esp_wifi_connect()`, which returns at once, so it never blocks the shared `esp_timer`
+task (F-09).
+
+A failed `esp_wifi_set_config` — refused while the station is mid-connect — is reported as
+`FAILED` rather than stopping the device through `ESP_ERROR_CHECK` (F-40).
 
 ### NVS
 

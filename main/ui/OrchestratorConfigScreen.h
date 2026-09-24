@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <string>
 
 #include "lvgl.h"
@@ -53,7 +52,6 @@ private:
     static void onTextAreaDefocused(lv_event_t* e);
 
     /** Login is a blocking HTTP round trip, so it never runs on the LVGL task (F-05). */
-    static void connectTask(void* arg);
 
     static void statusTimerCb(lv_timer_t* timer);
     void stopStatusTimer();
@@ -68,7 +66,6 @@ private:
     lv_obj_t* m_keyboard;
     lv_timer_t* m_statusTimer;
 
-    std::atomic<bool> m_connectInProgress;
 
     OrchestratorClient* m_client;
     WiFiController* m_wifiController;

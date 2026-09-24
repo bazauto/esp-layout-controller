@@ -28,7 +28,6 @@ OrchestratorConfigScreen::OrchestratorConfigScreen(OrchestratorClient* client,
     , m_connectButton(nullptr)
     , m_keyboard(nullptr)
     , m_statusTimer(nullptr)
-    , m_connectInProgress(false)
     , m_client(client)
     , m_wifiController(wifiController)
 {
@@ -355,25 +354,6 @@ void OrchestratorConfigScreen::onSaveClicked(lv_event_t* e)
     ESP_LOGI(TAG, "Orchestrator settings saved");
 }
 
-void OrchestratorConfigScreen::connectTask(void* arg)
-{
-    auto* self = static_cast<OrchestratorConfigScreen*>(arg);
-
-    if (self->m_client) {
-        const TransportSettings settings = TransportSettings::load();
-        esp_err_t err = self->m_client->connect(settings.host, settings.port,
-                                                settings.username, settings.password);
-        if (err == ESP_OK) {
-            self->m_client->refreshRoster();
-        }
-    }
-
-    self->m_connectInProgress = false;
-
-    // The status timer picks the result up; nothing to paint from this task.
-    vTaskDelete(nullptr);
-}
-
 void OrchestratorConfigScreen::onConnectClicked(lv_event_t* e)
 {
     auto* self = static_cast<OrchestratorConfigScreen*>(lv_event_get_user_data(e));
@@ -389,17 +369,10 @@ void OrchestratorConfigScreen::onConnectClicked(lv_event_t* e)
         return;
     }
 
-    if (self->m_connectInProgress.exchange(true)) {
-        ESP_LOGW(TAG, "Connect already in progress");
-        return;
-    }
-
-    // Off the LVGL task: the login is a blocking HTTP round trip and the roster
-    // is two more. Blocking here would freeze every throttle at once (F-05).
-    if (xTaskCreate(connectTask, "orch_ui_conn", 6144, self, 5, nullptr) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create connect task");
-        self->m_connectInProgress = false;
-    }
+    // The supervising task logs in with the settings just saved. Connecting
+    // from a task of this screen's own raced that supervisor for the same
+    // client (F-24, F-26); the status timer shows the result.
+    AppController::instance().requestOrchestratorReconnect();
 }
 
 void OrchestratorConfigScreen::onBackClicked(lv_event_t* e)

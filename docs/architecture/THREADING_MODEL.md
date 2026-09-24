@@ -13,12 +13,11 @@ The ESP32-S3 is dual-core. LVGL rendering runs on a dedicated task; network I/O 
 | `LVGL timer` | 6 KB | 2 | LVGL rendering + event handling | `lvgl_port.c` |
 | `withrottle_rx` | 4 KB | 5 | WiThrottle TCP receive loop; also sends the `*` heartbeat | `WiThrottleClient::connect()` |
 | `jmri_heartbeat` | 3 KB | 5 | JSON WebSocket ping every 30 s; stopped cooperatively, never deleted mid-send | `JmriJsonClient::startHeartbeat()` |
-| `jmri_autoconn` | 4 KB | 5 | Wait for WiFi → auto-connect JMRI | `JmriConnectionController::startAutoConnectTask()` |
-| `jmri_reconnect` | 3 KB | 4 | Monitor connections, exponential backoff | `JmriConnectionController::enableAutoReconnect()` |
+| `jmri_conn` | 6 KB | 4 | Every JMRI connect and disconnect: waits for WiFi, keeps both links up with backoff, carries out the config screen's requests | `JmriConnectionController::start()` |
+| `jmri_save` | 3 KB | 4 | One-shot: saves JMRI settings when the orchestrator is the transport | `JmriConnectionController::requestConnect()` |
 | `rotary_enc` | 3 KB | 4 | I2C encoder polling every 100 ms | `RotaryEncoderHal::startPollingTask()` |
 | `throttle_poll` | 4 KB | 3 | Refresh speed/direction every 10 s, for allocated throttles only | `ThrottleController::initialize()` |
-| `orch_connect` | 6 KB | 5 | Wait for WiFi → orchestrator login → fetch roster | `AppController::startOrchestratorConnectTask()` |
-| `orch_ui_conn` | 6 KB | 5 | Same, triggered by the config screen's Connect button | `OrchestratorConfigScreen::onConnectClicked()` |
+| `orch_connect` | 6 KB | 5 | Supervises the orchestrator link for the life of the app: login once WiFi is up, retries with backoff, fresh login when the socket stays down; woken by the config screen's Connect | `AppController::startOrchestratorConnectTask()` |
 | `websocket_task` | 6 KB | — | Orchestrator control-plane receive loop (owned by `esp_websocket_client`) | `OrchestratorClient::connect()` |
 | `track_power` | 4 KB | 5 | One-shot track-power write | `ThrottleController::requestTrackPower()` |
 
@@ -32,10 +31,12 @@ task is created at all and its 4 KB stack is never allocated.
 no orchestrator task does; under the orchestrator, `orch_connect` starts and JMRI
 auto-connect is never begun. Nothing sits retrying a server the operator has not chosen.
 
-`orch_connect`, `orch_ui_conn` and `track_power` all exist for the same reason: the
+`orch_connect` and `track_power` both exist for the same reason: the
 orchestrator's login, roster read and power command are **blocking HTTP round trips**, and
 none of that may happen on the LVGL task (F-05). `track_power` in particular is spawned
-straight from a button handler. All three are one-shot and delete themselves when done.
+straight from a button handler and is one-shot; `orch_connect` runs for the life of the
+application and is the only task that logs in (F-24). `jmri_conn` is the JMRI counterpart:
+the only task that connects or disconnects either JMRI client (F-34).
 
 ---
 
@@ -120,8 +121,7 @@ flowchart TB
     subgraph core0["Core 0 (or any)"]
         WT["withrottle_rx\n(TCP receive)"]
         JH["jmri_heartbeat\n(WS ping)"]
-        JA["jmri_autoconn\n(startup)"]
-        JR["jmri_reconnect\n(monitor)"]
+        JR["jmri_conn\n(connect + reconnect)"]
         RE["rotary_enc\n(I2C poll)"]
     end
 
@@ -138,7 +138,7 @@ flowchart TB
     RE -->|callback| TC
     TC -->|uiUpdate| LP
     WT -->|direct UI| LP
-    JA -->|connect| TC
+    JR -->|connect| TC
     LV --> LP
 ```
 

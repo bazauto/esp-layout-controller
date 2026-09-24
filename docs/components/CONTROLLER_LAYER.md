@@ -25,7 +25,7 @@ decides which network stack comes up at all:
 | Selected | Started | Not started |
 |----------|---------|-------------|
 | WiThrottle (default) | `WiThrottleBackend`, JMRI auto-connect | No orchestrator client is even constructed |
-| Orchestrator | `OrchestratorClient` + `OrchestratorBackend`, `orch_connect` task | JMRI auto-connect never begins |
+| Orchestrator | `OrchestratorClient` + `OrchestratorBackend`, `orch_connect` supervisor task | JMRI auto-connect never begins |
 
 The backend is chosen once and never swapped on a live `ThrottleController` — doing so would
 strand locos mid-command — so a transport change takes effect on restart.
@@ -197,13 +197,14 @@ JmriConnectionController(JmriJsonClient* json, WiThrottleClient* wt, WiFiControl
 
 | Task | Stack | Purpose |
 |------|-------|---------|
-| `jmri_autoconn` | 4 KB | Wait for WiFi (up to 30 s) → load NVS → connect both clients |
-| `jmri_reconnect` | 3 KB | Monitor every 5 s, exponential backoff (5 s → 60 s cap) |
+| `jmri_conn` | 6 KB | Every JMRI connect and disconnect: waits for WiFi indefinitely, connects both clients, reconnects with backoff (5 s → 60 s cap), carries out the config screen's requests |
+| `jmri_save` | 3 KB | One-shot: saves the JMRI screen's settings when the orchestrator is the transport and nothing may connect |
 
 ### Key Methods
 
 | Method | Description |
 |--------|-------------|
-| `loadSettingsAndAutoConnect()` | Read NVS, connect WiThrottle + JSON |
-| `startAutoConnectTask()` | Spawn background auto-connect task |
-| `enableAutoReconnect(bool)` | Start/stop reconnect monitoring task |
+| `start()` | Read NVS and start `jmri_conn`. Idempotent. WiThrottle transport only |
+| `requestConnect(ip, wtPort, powerMgr)` | Save these settings and (re)connect, on the worker. Returns at once |
+| `requestDisconnect()` | Disconnect both and stop reconnecting until the next connect. Returns at once |
+| `isBusy()` | True while a request is being carried out, for the screen's buttons |

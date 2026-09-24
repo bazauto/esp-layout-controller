@@ -8,10 +8,10 @@ All persistent configuration is stored in ESP-IDF's NVS (Non-Volatile Storage).
 |-----------|-----|------|---------|------------|---------|
 | `wifi` | `ssid` | string | — | `WiFiManager` | `WiFiManager` |
 | `wifi` | `password` | string | — | `WiFiManager` | `WiFiManager` |
-| `jmri` | `server_ip` | string | — | `JmriConfigScreen` | `JmriConnectionController` |
-| `jmri` | `wt_port` | string | `"12090"` | `JmriConfigScreen` | `JmriConnectionController` |
+| `jmri` | `server_ip` | string | — | `JmriConnectionController` | `JmriConnectionController`, `JmriConfigScreen` |
+| `jmri` | `wt_port` | string | `"12090"` | `JmriConnectionController` | `JmriConnectionController`, `JmriConfigScreen` |
 | `jmri` | `json_port` | string | `"12080"` | `JmriConnectionController` | `JmriConnectionController` |
-| `jmri` | `power_mgr` | string | `"DCC++"` | `JmriConfigScreen` | `JmriConnectionController` |
+| `jmri` | `power_mgr` | string | `"DCC++"` | `JmriConnectionController` | `JmriConnectionController`, `JmriConfigScreen` |
 | `jmri` | `speed_steps` | i32 | `4` | `JmriConfigScreen` | `ThrottleController` |
 | `orch` | `transport` | u8 | `0` (WiThrottle) | `JmriConfigScreen` | `AppController` |
 | `orch` | `host` | string | — | `OrchestratorConfigScreen` | `AppController` |
@@ -40,6 +40,6 @@ Two refusals are deliberate, both in `TransportSettings::load()`:
 same accepted and documented risk as the WiFi password (F-18), not an oversight. It is
 masked on screen and never logged.
 
-- **WiFi credentials** are saved on successful connection and loaded on boot for auto-connect.
-- **JMRI settings** are saved when the user presses "Connect" on the JMRI config screen. The `json_port` is typically discovered automatically from the WiThrottle `PW` message rather than configured manually.
+- **WiFi credentials** are saved on successful connection — only once they have produced an IP address, so a mistyped password never replaces a good one (F-40) — and loaded on boot for auto-connect.
+- **JMRI settings** are saved when the user presses "Connect" on the JMRI config screen, by `JmriConnectionController` on its own task, not on the LVGL task. The `json_port` is discovered from the WiThrottle `PW` message and saved by the same task when it changes, rather than configured manually.
 - **Speed steps per click** (1–20) controls how many speed steps each encoder detent applies. Higher values = coarser control. Configurable from the JMRI settings screen.

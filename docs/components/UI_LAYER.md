@@ -124,7 +124,10 @@ screen titled "JMRI Server Configuration" had no business owning any of them.
 **JMRI connections panel:** WiThrottle and JMRI JSON status. Device-wide status (software,
 hardware, WiFi, encoders) is on the settings screen, not duplicated here.
 
-**Connect flow:** Connects WiThrottle first; when the server sends back the `PW` (web port) message, auto-connects the JSON client using the discovered port.
+**Connect flow:** Connect and Disconnect are requests to `JmriConnectionController`, carried
+out on its `jmri_conn` task: saving, connecting and the wait for the receive task to exit all
+happen there, never on the LVGL task (F-34). Disconnect sticks until the next Connect. The
+JSON client's port comes from WiThrottle's `PW` message. Status is polled on an LVGL timer.
 
 **Navigation:** Back button → `show_settings_screen()`
 
@@ -167,9 +170,10 @@ transports are peers, and this one needs four fields including a credential.
 The password field is masked on screen. It is still plaintext in NVS — the accepted F-18
 risk.
 
-**Connect flow:** Save & Connect writes NVS, then does the login and roster fetch **on its
-own task** (`orch_ui_conn`). The login is a blocking HTTP round trip; running it on the LVGL
-task would freeze every throttle at once (F-05).
+**Connect flow:** Save & Connect writes NVS, then wakes the `orch_connect` supervisor, which
+logs in with the saved settings and fetches the roster. The login is a blocking HTTP round
+trip; running it on the LVGL task would freeze every throttle at once (F-05). The screen
+used to run its own connect task, which raced the supervisor for the same client.
 
 **Navigation:** Back button → `show_settings_screen()`
 

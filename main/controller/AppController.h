@@ -38,6 +38,16 @@ public:
     void showOrchestratorConfigScreen();
     void autoConnectJmri();
 
+    /**
+     * @brief Log in to the orchestrator afresh, with the settings now saved.
+     *
+     * Wakes the supervising task rather than connecting on the caller's --
+     * the caller is an LVGL event handler, and the supervisor must stay the
+     * only thing that connects (F-24). No-op unless the orchestrator is the
+     * selected transport.
+     */
+    void requestOrchestratorReconnect();
+
     JmriJsonClient* getJmriClient() const;
     WiThrottleClient* getWiThrottleClient() const;
     /** Null unless the orchestrator transport is the one selected. */
@@ -50,8 +60,16 @@ public:
 private:
     AppController();
 
-    /** Logs in and fetches the roster off the LVGL task (F-05). */
+    /** Starts the task that keeps the orchestrator link up (F-24). */
     void startOrchestratorConnectTask();
+
+    /**
+     * Supervises the orchestrator link for the life of the application: logs
+     * in once WiFi is up, however long that takes; retries a failed login with
+     * backoff; and logs in afresh when the socket stays down longer than its
+     * own reconnect (which reuses the old cookie) gets to recover it. Off the
+     * LVGL task, because a login is a blocking HTTP round trip (F-05).
+     */
     static void orchestratorConnectTask(void* arg);
 
     std::unique_ptr<MainScreen> m_mainScreen;

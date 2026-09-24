@@ -3,10 +3,12 @@
 #include "../communication/JmriJsonClient.h"
 #include "../communication/WiThrottleClient.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+
+#include <cstdlib>
+#include <string>
 
 static const char* TAG = "JmriConnCtrl";
 
@@ -16,200 +18,380 @@ static const char* NVS_KEY_JSON_PORT = "json_port";
 static const char* NVS_KEY_WITHROTTLE_PORT = "wt_port";
 static const char* NVS_KEY_POWER_MANAGER = "power_mgr";
 
+namespace {
+
+/** Checks the links this often, and at once when woken by a request. */
+constexpr uint32_t WORKER_TICK_MS = 1000;
+
+/** Settle time after WiFi comes up before the first attempt. */
+constexpr int64_t WIFI_SETTLE_US = 1000 * 1000;
+
+/** Backoff between reconnect attempts: 5 s, doubling, capped at a minute. */
+constexpr uint32_t RETRY_BASE_S = 5;
+constexpr uint32_t RETRY_MAX_S = 60;
+
+/** The worker connects over TCP and WebSocket, runs the clients' connection
+ * callbacks -- which repaint the main screen under the LVGL lock -- and writes
+ * NVS. Sized as the config screen's own connect task was. */
+constexpr uint32_t WORKER_STACK_BYTES = 6144;
+
+uint16_t parsePort(const char* text, uint16_t fallback)
+{
+    char* end = nullptr;
+    const long value = std::strtol(text, &end, 10);
+    if (end == text || value <= 0 || value > 65535) {
+        return fallback;
+    }
+    return static_cast<uint16_t>(value);
+}
+
+}  // namespace
+
 JmriConnectionController::JmriConnectionController(JmriJsonClient* jsonClient,
                                                    WiThrottleClient* wtClient,
                                                    WiFiController* wifiController)
     : m_jsonClient(jsonClient)
     , m_wtClient(wtClient)
     , m_wifiController(wifiController)
-    , m_autoReconnectEnabled(false)
-    , m_savedServerIp()
-    , m_savedJsonPort(12080)
-    , m_savedWtPort(12090)
-    , m_savedPowerMgr("DCC++")
-    , m_reconnectTaskHandle(nullptr)
-    , m_autoConnectTaskHandle(nullptr)
+    , m_mutex(nullptr)
+    , m_autoReconnect(false)
+    , m_request(Request::NONE)
+    , m_discoveredJsonPort(0)
+    , m_busy(false)
+    , m_workerTask(nullptr)
 {
+    m_mutex = xSemaphoreCreateMutex();
+    if (!m_mutex) {
+        ESP_LOGE(TAG, "Failed to create settings mutex");
+    }
 }
 
-JmriConnectionController::~JmriConnectionController() = default;
-
-void JmriConnectionController::loadSettingsAndAutoConnect()
+JmriConnectionController::~JmriConnectionController()
 {
-    if (!m_wifiController || !m_wifiController->isConnected()) {
-        ESP_LOGI(TAG, "WiFi not connected, skipping JMRI auto-connect");
-        return;
+    // Owned by the AppController singleton, so in practice never destroyed
+    // while the worker runs.
+    if (m_workerTask) {
+        vTaskDelete(m_workerTask);
+        m_workerTask = nullptr;
     }
+    if (m_mutex) {
+        vSemaphoreDelete(m_mutex);
+        m_mutex = nullptr;
+    }
+}
+
+bool JmriConnectionController::lock() const
+{
+    return m_mutex && xSemaphoreTake(m_mutex, pdMS_TO_TICKS(1000)) == pdTRUE;
+}
+
+void JmriConnectionController::unlock() const
+{
+    if (m_mutex) {
+        xSemaphoreGive(m_mutex);
+    }
+}
+
+// --- Settings ---------------------------------------------------------------
+
+JmriConnectionController::Settings JmriConnectionController::loadSettings()
+{
+    Settings settings;
 
     nvs_handle_t handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
-    if (err != ESP_OK) {
-        ESP_LOGD(TAG, "No saved JMRI settings for auto-connect");
-        return;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        ESP_LOGD(TAG, "No saved JMRI settings");
+        return settings;
     }
 
-    char serverIp[64] = {0};
-    char jsonPortStr[8] = "12080";
-    char wtPortStr[8] = "12090";
-    char powerMgr[64] = "DCC++";
-    size_t length;
-
-    length = sizeof(serverIp);
-    err = nvs_get_str(handle, NVS_KEY_SERVER_IP, serverIp, &length);
-    if (err != ESP_OK || serverIp[0] == '\0') {
-        ESP_LOGD(TAG, "No server IP saved");
-        nvs_close(handle);
-        return;
+    char text[64];
+    size_t length = sizeof(text);
+    if (nvs_get_str(handle, NVS_KEY_SERVER_IP, text, &length) == ESP_OK) {
+        settings.serverIp = text;
     }
 
-    length = sizeof(jsonPortStr);
-    nvs_get_str(handle, NVS_KEY_JSON_PORT, jsonPortStr, &length);
+    char port[8];
+    length = sizeof(port);
+    if (nvs_get_str(handle, NVS_KEY_JSON_PORT, port, &length) == ESP_OK) {
+        settings.jsonPort = parsePort(port, DEFAULT_JSON_PORT);
+    }
+    length = sizeof(port);
+    if (nvs_get_str(handle, NVS_KEY_WITHROTTLE_PORT, port, &length) == ESP_OK) {
+        settings.wtPort = parsePort(port, DEFAULT_WT_PORT);
+    }
 
-    length = sizeof(wtPortStr);
-    nvs_get_str(handle, NVS_KEY_WITHROTTLE_PORT, wtPortStr, &length);
-
-    length = sizeof(powerMgr);
-    nvs_get_str(handle, NVS_KEY_POWER_MANAGER, powerMgr, &length);
+    length = sizeof(text);
+    if (nvs_get_str(handle, NVS_KEY_POWER_MANAGER, text, &length) == ESP_OK && text[0] != '\0') {
+        settings.powerManager = text;
+    }
 
     nvs_close(handle);
+    return settings;
+}
 
-    uint16_t jsonPort = static_cast<uint16_t>(std::atoi(jsonPortStr));
-    uint16_t wtPort = static_cast<uint16_t>(std::atoi(wtPortStr));
+void JmriConnectionController::saveSettings(const Settings& settings)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        return;
+    }
 
-    if (jsonPort == 0) jsonPort = 12080;
-    if (wtPort == 0) wtPort = 12090;
+    // Ports stay strings: that is how they have always been stored.
+    nvs_set_str(handle, NVS_KEY_SERVER_IP, settings.serverIp.c_str());
+    nvs_set_str(handle, NVS_KEY_WITHROTTLE_PORT, std::to_string(settings.wtPort).c_str());
+    nvs_set_str(handle, NVS_KEY_POWER_MANAGER, settings.powerManager.c_str());
+    nvs_commit(handle);
+    nvs_close(handle);
 
-    m_savedServerIp = serverIp;
-    m_savedJsonPort = jsonPort;
-    m_savedWtPort = wtPort;
-    m_savedPowerMgr = powerMgr;
+    ESP_LOGI(TAG, "JMRI settings saved (%s, WiThrottle %u, power manager '%s')",
+             settings.serverIp.c_str(), settings.wtPort, settings.powerManager.c_str());
+}
 
-    ESP_LOGI(TAG, "Auto-connecting to JMRI: %s (JSON:%d, WiThrottle:%d, Power:%s)",
-             m_savedServerIp.c_str(), m_savedJsonPort, m_savedWtPort, m_savedPowerMgr.c_str());
+void JmriConnectionController::saveJsonPort(uint16_t port)
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return;
+    }
+    nvs_set_str(handle, NVS_KEY_JSON_PORT, std::to_string(port).c_str());
+    nvs_commit(handle);
+    nvs_close(handle);
+}
 
+void JmriConnectionController::saveTask(void* arg)
+{
+    Settings* settings = static_cast<Settings*>(arg);
+    if (settings) {
+        saveSettings(*settings);
+        delete settings;
+    }
+    vTaskDelete(nullptr);
+}
+
+// --- Requests ---------------------------------------------------------------
+
+void JmriConnectionController::start()
+{
+    if (m_workerTask) {
+        return;
+    }
     if (!m_jsonClient || !m_wtClient) {
-        ESP_LOGE(TAG, "Clients not initialized");
+        ESP_LOGE(TAG, "Clients not initialised; JMRI connection not started");
         return;
     }
 
-    m_jsonClient->setConfiguredPowerName(m_savedPowerMgr);
-
-    err = m_jsonClient->connect(m_savedServerIp.c_str(), m_savedJsonPort);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "JSON client auto-connect failed (will remain disconnected)");
+    // An NVS read, but start() runs from AppController::initialise(), not from
+    // an LVGL event handler.
+    const Settings saved = loadSettings();
+    if (lock()) {
+        m_settings = saved;
+        m_autoReconnect = !saved.serverIp.empty();
+        unlock();
     }
 
-    err = m_wtClient->connect(m_savedServerIp.c_str(), m_savedWtPort);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "WiThrottle client auto-connect failed (will remain disconnected)");
-    }
+    // PW announces the JSON server's port. The receive task only records it:
+    // connecting the JSON client from there raced the reconnect task into a
+    // double destroy of the WebSocket client (F-34).
+    m_wtClient->setWebPortCallback([this](uint16_t port) {
+        m_discoveredJsonPort = port;
+        wakeWorker();
+    });
 
-    enableAutoReconnect(true);
-}
-
-void JmriConnectionController::enableAutoReconnect(bool enable)
-{
-    m_autoReconnectEnabled = enable;
-    if (enable && m_reconnectTaskHandle == nullptr) {
-        startReconnectTask();
-    }
-}
-
-void JmriConnectionController::startAutoConnectTask()
-{
-    if (m_autoConnectTaskHandle != nullptr) {
+    if (xTaskCreate(workerTask, "jmri_conn", WORKER_STACK_BYTES, this, 4, &m_workerTask) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create JMRI connection task");
+        m_workerTask = nullptr;
         return;
     }
 
-    xTaskCreate([](void* arg) {
-        auto* controller = static_cast<JmriConnectionController*>(arg);
-        if (!controller) {
-            vTaskDelete(NULL);
-            return;
+    if (saved.serverIp.empty()) {
+        ESP_LOGI(TAG, "No JMRI server saved; waiting for one from the config screen");
+    } else {
+        ESP_LOGI(TAG, "JMRI: %s (JSON %u, WiThrottle %u, power manager '%s'); connecting once WiFi is up",
+                 saved.serverIp.c_str(), saved.jsonPort, saved.wtPort, saved.powerManager.c_str());
+    }
+}
+
+void JmriConnectionController::requestConnect(const std::string& serverIp,
+                                              uint16_t wtPort,
+                                              const std::string& powerManager)
+{
+    Settings settings;
+    settings.serverIp = serverIp;
+    settings.wtPort = (wtPort != 0) ? wtPort : DEFAULT_WT_PORT;
+    settings.powerManager = powerManager.empty() ? DEFAULT_POWER_MANAGER : powerManager;
+
+    if (!m_workerTask) {
+        // The orchestrator is the selected transport, and the device must not
+        // sit retrying a server the operator did not choose. Keep the settings
+        // for when WiThrottle is selected. Saved off the calling task, which is
+        // the LVGL task (F-05).
+        ESP_LOGW(TAG, "WiThrottle is not the selected transport; saving JMRI settings only");
+        auto* copy = new Settings(settings);
+        if (xTaskCreate(saveTask, "jmri_save", 3072, copy, 4, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create JMRI settings save task");
+            delete copy;
+        }
+        return;
+    }
+
+    if (!lock()) {
+        ESP_LOGW(TAG, "Could not lock to request a JMRI connect");
+        return;
+    }
+    // Keep the JSON port learned from PW; the new server's PW corrects it.
+    settings.jsonPort = m_settings.jsonPort;
+    m_requestedSettings = settings;
+    m_request = Request::CONNECT;
+    unlock();
+
+    m_busy = true;
+    wakeWorker();
+}
+
+void JmriConnectionController::requestDisconnect()
+{
+    if (!m_workerTask) {
+        ESP_LOGI(TAG, "JMRI connection not running; nothing to disconnect");
+        return;
+    }
+
+    if (!lock()) {
+        ESP_LOGW(TAG, "Could not lock to request a JMRI disconnect");
+        return;
+    }
+    m_request = Request::DISCONNECT;
+    unlock();
+
+    m_busy = true;
+    wakeWorker();
+}
+
+void JmriConnectionController::wakeWorker()
+{
+    if (m_workerTask) {
+        xTaskNotifyGive(m_workerTask);
+    }
+}
+
+// --- Worker -----------------------------------------------------------------
+
+void JmriConnectionController::workerTask(void* arg)
+{
+    static_cast<JmriConnectionController*>(arg)->runWorker();
+}
+
+void JmriConnectionController::runWorker()
+{
+    uint32_t failedAttempts = 0;
+    int64_t nextAttemptUs = 0;
+    bool wifiWasUp = false;
+
+    for (;;) {
+        Request request = Request::NONE;
+        Settings requested;
+        if (lock()) {
+            request = m_request;
+            m_request = Request::NONE;
+            requested = m_requestedSettings;
+            unlock();
         }
 
-        for (int i = 0; i < 60; i++) {
-            if (controller->m_wifiController && controller->m_wifiController->isConnected()) {
-                ESP_LOGI(TAG, "WiFi connected, attempting JMRI auto-connect");
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                controller->loadSettingsAndAutoConnect();
-                break;
+        if (request == Request::DISCONNECT) {
+            // Sticks: nothing reconnects until the operator asks again.
+            if (lock()) {
+                m_autoReconnect = false;
+                unlock();
             }
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
-
-        controller->m_autoConnectTaskHandle = nullptr;
-        vTaskDelete(NULL);
-    }, "jmri_autoconn", 4096, this, 5, reinterpret_cast<TaskHandle_t*>(&m_autoConnectTaskHandle));
-}
-
-void JmriConnectionController::startReconnectTask()
-{
-    xTaskCreate(reconnectTask, "jmri_reconnect", 3072, this, 4, reinterpret_cast<TaskHandle_t*>(&m_reconnectTaskHandle));
-}
-
-void JmriConnectionController::reconnectTask(void* arg)
-{
-    auto* controller = static_cast<JmriConnectionController*>(arg);
-    if (!controller) return;
-
-    ESP_LOGI(TAG, "Auto-reconnect task started");
-
-    int failedAttempts = 0;
-    const int maxBackoff = 60;
-
-    while (true) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-
-        if (!controller->m_autoReconnectEnabled ||
-            !controller->m_wifiController ||
-            !controller->m_wifiController->isConnected()) {
+            ESP_LOGI(TAG, "Disconnecting from JMRI on request; not reconnecting until asked");
+            m_jsonClient->disconnect();
+            m_wtClient->disconnect();
+        } else if (request == Request::CONNECT) {
+            saveSettings(requested);
+            if (lock()) {
+                m_settings = requested;
+                m_autoReconnect = true;
+                unlock();
+            }
+            ESP_LOGI(TAG, "Connecting to JMRI at %s on request", requested.serverIp.c_str());
+            // Start clean: it may be a different server.
+            m_jsonClient->disconnect();
+            m_wtClient->disconnect();
             failedAttempts = 0;
-            continue;
+            nextAttemptUs = 0;
         }
 
-        if (!controller->m_jsonClient || !controller->m_wtClient) {
-            continue;
+        Settings settings;
+        bool autoReconnect = false;
+        if (lock()) {
+            settings = m_settings;
+            autoReconnect = m_autoReconnect;
+            unlock();
         }
 
-        bool jsonConnected = controller->m_jsonClient->isConnected();
-        bool wtConnected = controller->m_wtClient->isConnected();
+        const bool wifiUp = m_wifiController && m_wifiController->isConnected();
+        const int64_t now = esp_timer_get_time();
+        if (wifiUp && !wifiWasUp) {
+            // Waits for WiFi as long as it takes. The old auto-connect gave up
+            // after 30 s and never started reconnecting (F-24).
+            nextAttemptUs = now + WIFI_SETTLE_US;
+            failedAttempts = 0;
+        }
+        wifiWasUp = wifiUp;
 
-        if (jsonConnected && wtConnected) {
-            if (failedAttempts > 0) {
-                ESP_LOGI(TAG, "Connection restored");
+        if (autoReconnect && wifiUp && !settings.serverIp.empty()) {
+            // A JSON port learned from PW: kept for the next boot, and the JSON
+            // client moved to it.
+            const uint16_t discovered = m_discoveredJsonPort.exchange(0);
+            if (discovered != 0 && discovered != settings.jsonPort) {
+                ESP_LOGI(TAG, "JMRI announced JSON port %u (was %u)", discovered, settings.jsonPort);
+                saveJsonPort(discovered);
+                settings.jsonPort = discovered;
+                if (lock()) {
+                    m_settings.jsonPort = discovered;
+                    unlock();
+                }
+                m_jsonClient->disconnect();
+            }
+
+            const bool wtUp = m_wtClient->isConnected();
+            const bool jsonUp = m_jsonClient->isConnected();
+
+            if (wtUp && jsonUp) {
+                if (failedAttempts > 0) {
+                    ESP_LOGI(TAG, "JMRI connected: WiThrottle and JSON both up");
+                }
                 failedAttempts = 0;
-            }
-            continue;
-        }
+                nextAttemptUs = 0;
+            } else if (request == Request::CONNECT || esp_timer_get_time() >= nextAttemptUs) {
+                if (!wtUp) {
+                    ESP_LOGI(TAG, "Connecting WiThrottle to %s:%u", settings.serverIp.c_str(),
+                             settings.wtPort);
+                    m_wtClient->connect(settings.serverIp, settings.wtPort);
+                }
+                // Not while its own socket is still coming up: re-creating the
+                // client then only restarts the attempt.
+                if (!jsonUp &&
+                    m_jsonClient->getState() != JmriJsonClient::ConnectionState::CONNECTING) {
+                    m_jsonClient->setConfiguredPowerName(settings.powerManager);
+                    m_jsonClient->connect(settings.serverIp, settings.jsonPort);
+                }
 
-        int backoffDelay = 5 * (1 << failedAttempts);
-        if (backoffDelay > maxBackoff) {
-            backoffDelay = maxBackoff;
-        }
-
-        ESP_LOGW(TAG, "JMRI disconnected (attempt %d, next retry in %ds)",
-                 failedAttempts + 1, backoffDelay);
-
-        vTaskDelay(pdMS_TO_TICKS(backoffDelay * 1000));
-
-        if (!jsonConnected && !controller->m_savedServerIp.empty()) {
-            ESP_LOGI(TAG, "Attempting to reconnect JSON client...");
-            controller->m_jsonClient->setConfiguredPowerName(controller->m_savedPowerMgr);
-            esp_err_t err = controller->m_jsonClient->connect(controller->m_savedServerIp.c_str(), controller->m_savedJsonPort);
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "JSON client reconnected");
-            }
-        }
-
-        if (!wtConnected && !controller->m_savedServerIp.empty()) {
-            ESP_LOGI(TAG, "Attempting to reconnect WiThrottle client...");
-            esp_err_t err = controller->m_wtClient->connect(controller->m_savedServerIp.c_str(), controller->m_savedWtPort);
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "WiThrottle client reconnected");
+                const uint32_t shift = failedAttempts < 4 ? failedAttempts : 4;
+                uint32_t backoffS = RETRY_BASE_S << shift;
+                if (backoffS > RETRY_MAX_S) {
+                    backoffS = RETRY_MAX_S;
+                }
+                failedAttempts++;
+                nextAttemptUs = esp_timer_get_time() + static_cast<int64_t>(backoffS) * 1000000;
             }
         }
 
-        failedAttempts++;
+        if (request != Request::NONE) {
+            m_busy = false;
+        }
+
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WORKER_TICK_MS));
     }
 }

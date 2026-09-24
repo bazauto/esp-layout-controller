@@ -1,7 +1,7 @@
 # Review Remediation Plan — Second Pass
 
 **Created:** 2026-09-24
-**Status:** In progress — Batches 1 and 2 code done, awaiting their bench cycles
+**Status:** In progress — Batches 1–3 (every HIGH) code done, awaiting their bench cycles
 **Source:** Static review of the whole firmware (`main/`, build config, CI), with the
 orchestrator-facing behaviour checked against `bazauto/layout-orchestration`. Nothing was
 flashed during the review: every "bench" criterion below is unverified until someone runs it
@@ -25,9 +25,9 @@ freeze while one is moving.
 | F-21 | [Use-after-free on return to the main screen](#f-21-use-after-free-on-return-to-the-main-screen) | HIGH | Medium | 1 | Code done |
 | F-22 | [WiThrottle reconnect leaks a socket and loses the session](#f-22-withrottle-reconnect-leaks-a-socket-and-loses-the-session) | HIGH | Medium | 2 | Code done |
 | F-23 | [WiThrottle heartbeat never armed](#f-23-withrottle-heartbeat-never-armed) | HIGH | Small | 2 | Code done |
-| F-24 | [No automatic recovery after an ordinary outage](#f-24-no-automatic-recovery-after-an-ordinary-outage) | HIGH | Medium | 3 | Open |
+| F-24 | [No automatic recovery after an ordinary outage](#f-24-no-automatic-recovery-after-an-ordinary-outage) | HIGH | Medium | 3 | Code done |
 | F-25 | [Physical knobs not gated; optimistic update outlives a failed send](#f-25-physical-knobs-not-gated-optimistic-update-outlives-a-failed-send) | MEDIUM | Small | 4 | Open |
-| F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Open |
+| F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Concurrent connect removed (batch 3); handle lock: open |
 | F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Open |
 | F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Open |
 | F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Open |
@@ -35,13 +35,13 @@ freeze while one is moving.
 | F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Code done |
 | F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done |
 | F-33 | [Task stack headroom unmeasured](#f-33-task-stack-headroom-unmeasured) | MEDIUM | Small | 5 | Open |
-| F-34 | [JMRI config screen connect/disconnect faults](#f-34-jmri-config-screen-connectdisconnect-faults) | MEDIUM | Medium | 3 | Open |
+| F-34 | [JMRI config screen connect/disconnect faults](#f-34-jmri-config-screen-connectdisconnect-faults) | MEDIUM | Medium | 3 | Code done |
 | F-35 | [Orchestrator roster refused above ~35 locos](#f-35-orchestrator-roster-refused-above-35-locos) | MEDIUM | Small | 5 | Open |
 | F-36 | [Operator credential and session cookie in cleartext](#f-36-operator-credential-and-session-cookie-in-cleartext) | MEDIUM | Small (decision) | 5 | Open |
 | F-37 | [WiThrottle updates unvalidated](#f-37-withrottle-updates-unvalidated) | LOW | Small | 5 | Open |
 | F-38 | [Hot-path logging and repaint cost](#f-38-hot-path-logging-and-repaint-cost) | LOW | Small | 5 | Open |
-| F-39 | [NVS writes on the LVGL task](#f-39-nvs-writes-on-the-lvgl-task) | LOW | Small | 5 | Open |
-| F-40 | [WiFi credential save and reboot-on-error](#f-40-wifi-credential-save-and-reboot-on-error) | LOW | Small | 3 | Open |
+| F-39 | [NVS writes on the LVGL task](#f-39-nvs-writes-on-the-lvgl-task) | LOW | Small | 5 | JMRI settings: done (batch 3); rest: open |
+| F-40 | [WiFi credential save and reboot-on-error](#f-40-wifi-credential-save-and-reboot-on-error) | LOW | Small | 3 | Code done |
 | F-41 | [Seesaw read timing](#f-41-seesaw-read-timing) | LOW | Small | 5 | Open |
 | F-42 | [Protocol hygiene odds and ends](#f-42-protocol-hygiene-odds-and-ends) | LOW | Small | 5 | Open |
 | F-43 | [CI hardening](#f-43-ci-hardening) | LOW | Small | 5 | Open |
@@ -310,6 +310,13 @@ In each case the operator has no control until they fix it by hand in settings.
 
 #### Acceptance Criteria
 
+- [x] `WiFiManager` keeps retrying after the immediate retries (one-shot `esp_timer`, 5 s
+      doubling to 60 s) until Disconnect or Forget, both of which the WiFi screen now offers
+      while it is in `FAILED`.
+- [x] `orch_connect` supervises for the life of the app: waits for WiFi indefinitely, retries
+      a failed login with backoff, logs in afresh after 30 s without a socket, retries a failed
+      roster read. The config screen's Connect wakes it instead of connecting itself.
+- [x] `jmri_conn` waits for WiFi indefinitely (see F-34).
 - [ ] Bench: power-cycle the router with the device running; it reconnects without a touch.
 - [ ] Bench: boot the device before the orchestrator host; it connects when the host is up.
 - [ ] Bench: same for JMRI.
@@ -359,6 +366,11 @@ also check-then-act, so two connect tasks can both pass it.
 
 Guard the handle with its own mutex held across send and across stop/destroy (sends are
 bounded at 1 s), and make the connecting check atomic.
+
+**Progress:** Batch 3 made the `orch_connect` supervisor the only caller of `connect()` — the
+config screen now wakes it rather than connecting on a task of its own — so two connects can
+no longer race. A re-login still destroys the handle under a concurrent sender; that half
+remains.
 
 **Files:** `OrchestratorClient.h/.cpp`
 
@@ -541,6 +553,19 @@ the results in `THREADING_MODEL.md`, and resize with a margin.
 Route both the screen's connect and disconnect through `JmriConnectionController`, which owns
 the saved settings, the auto-reconnect flag and the one task that connects.
 
+#### Acceptance Criteria
+
+- [x] One task, `jmri_conn`, carries out every JMRI connect and disconnect, including the
+      screen's; `jmri_autoconn`, `jmri_reconnect` and the screen's `jmri_connect` are gone.
+- [x] Disconnect and Connect return at once on the LVGL task; saving happens on the worker.
+- [x] Disconnect turns reconnecting off until the next Connect.
+- [x] The `PW` callback is registered once, before any connect, and only records the port;
+      the worker saves it as `json_port` and moves the JSON client.
+- [x] A manual connect updates the settings the worker reconnects to.
+- [x] Under the orchestrator, Connect saves only (one-shot `jmri_save` task).
+- [ ] Bench: Connect, Disconnect (stays down past ten seconds), Connect again; change server
+      address and confirm reconnects go to the new one.
+
 ---
 
 ### F-35: Orchestrator roster refused above ~35 locos
@@ -606,6 +631,10 @@ Record the decision in CLAUDE.md's transport section. If TLS is wanted, size it 
 `JmriConfigScreen::saveSettings`, the orchestrator screen's save and `saveSpeedSteps` still
 write NVS from event handlers, against F-05's rule.
 
+**Progress:** the JMRI settings are now saved by `JmriConnectionController` on its own task
+(batch 3, F-34). The orchestrator screen's save, `saveSpeedSteps`, and the WiFi screen's
+Forget remain.
+
 ---
 
 ### F-40: WiFi credential save and reboot-on-error
@@ -614,6 +643,14 @@ write NVS from event handlers, against F-05's rule.
 
 `WiFiManager::connect` saves credentials before it knows they work, overwriting a good password
 with a typo; and `ESP_ERROR_CHECK(esp_wifi_set_config)` turns a recoverable error into a reboot.
+
+#### Acceptance Criteria
+
+- [x] Credentials entered on the screen are saved on `IP_EVENT_STA_GOT_IP`, read back from the
+      driver; the stored-credential path saves nothing.
+- [x] A failed `esp_wifi_set_config` reports `FAILED` and returns the error.
+- [ ] Bench: enter a wrong password over a working network, reboot; the device rejoins the
+      working network.
 
 ---
 
