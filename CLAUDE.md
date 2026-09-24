@@ -178,6 +178,11 @@ Things that look like bugs or oversights and are not. One line each.
 - **`getThrottle` / `getKnob` bypass `m_stateMutex` and are guarded by
   `CONFIG_THROTTLE_TESTS`** — deliberately unsafe test-only accessors (F-06 removed the
   unguarded ones). They must never gain a non-test caller.
+- **`MainScreen` is built once and never destroyed** (F-21). Rebuilding it freed it under a
+  task already waiting on the LVGL lock to repaint it. Constraint 4 is about where state
+  lives, not a licence to rebuild this screen.
+- **No UI class registers on a client's connection callback.** Those are single slots owned by
+  the active backend; config screens poll on an LVGL timer instead (F-21, F-30).
 - **`JmriJsonClient` parses JSON by substring search** (`extractJsonString` /
   `extractJsonInt`) rather than with a parser. Adequate for the narrow JMRI subset it
   reads; **not** adequate for orchestrator payloads. `OrchestratorClient` uses cJSON and
