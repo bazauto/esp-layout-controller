@@ -19,8 +19,9 @@ and stop as soon as you know enough:
    diagrams per flow, per-layer reference, protocol wire formats.
 
 `docs/REVIEW_REMEDIATION_PLAN.md` is the record of a completed hardening pass (F-01…F-18,
-all Done). Read a finding when you are about to touch the code it covers — several of the
-"why is it written like this" answers live there and nowhere else.
+all Done); `docs/REVIEW_REMEDIATION_PLAN_2.md` is the second pass (F-19…F-44, in progress,
+with a per-finding status). Read a finding when you are about to touch the code it covers —
+several of the "why is it written like this" answers live there and nowhere else.
 
 **`.github/copilot-instructions.md` covers the same conventions for Copilot.** Where the
 two overlap they must be changed together; where they disagree, this file wins for Claude,
