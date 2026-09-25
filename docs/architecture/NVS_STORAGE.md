@@ -12,14 +12,23 @@ All persistent configuration is stored in ESP-IDF's NVS (Non-Volatile Storage).
 | `jmri` | `wt_port` | string | `"12090"` | `JmriConnectionController` | `JmriConnectionController`, `JmriConfigScreen` |
 | `jmri` | `json_port` | string | `"12080"` | `JmriConnectionController` | `JmriConnectionController` |
 | `jmri` | `power_mgr` | string | `"DCC++"` | `JmriConnectionController` | `JmriConnectionController`, `JmriConfigScreen` |
-| `jmri` | `speed_steps` | i32 | `4` | `JmriConfigScreen` | `ThrottleController` |
-| `orch` | `transport` | u8 | `0` (WiThrottle) | `JmriConfigScreen` | `AppController` |
-| `orch` | `host` | string | — | `OrchestratorConfigScreen` | `AppController` |
-| `orch` | `port` | u16 | `3000` | `OrchestratorConfigScreen` | `AppController` |
-| `orch` | `user` | string | — | `OrchestratorConfigScreen` | `AppController` |
-| `orch` | `pass` | string | — | `OrchestratorConfigScreen` | `AppController` |
+| `jmri` | `speed_steps` | i32 | `4` | `SettingsScreen`, through `SettingsWriter` | `ThrottleController` |
+| `orch` | `transport` | u8 | `0` (WiThrottle) | `SettingsScreen`, through `SettingsWriter` | `AppController` |
+| `orch` | `host` | string | — | `OrchestratorConfigScreen`, through `SettingsWriter` | `AppController` |
+| `orch` | `port` | u16 | `3000` | `OrchestratorConfigScreen`, through `SettingsWriter` | `AppController` |
+| `orch` | `user` | string | — | `OrchestratorConfigScreen`, through `SettingsWriter` | `AppController` |
+| `orch` | `pass` | string | — | `OrchestratorConfigScreen`, through `SettingsWriter` | `AppController` |
 
 ## Notes
+
+### Who writes, and on which task
+
+Nothing in the UI writes NVS on the LVGL task (F-05, F-39). Screens hand each write to
+`SettingsWriter`, whose one task carries them out in the order they were asked for. The `orch`
+keys are written as a read-modify-write on that task, so a transport choice and an
+orchestrator Save made moments apart cannot overwrite each other with stale copies. WiFi
+credentials are written by `WiFiManager` on the event loop, once they have produced an IP
+address (F-40); Forget goes through the writer.
 
 ### The `orch` namespace
 

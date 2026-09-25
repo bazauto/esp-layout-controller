@@ -12,6 +12,8 @@
 #include "ThrottleController.h"
 #include "WiFiController.h"
 #include "JmriConnectionController.h"
+#include "SettingsWriter.h"
+#include "../utils/StackReport.h"
 #include "../hardware/RotaryEncoderHal.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -47,7 +49,8 @@ AppController& AppController::instance()
 }
 
 AppController::AppController()
-    : m_mainScreen(nullptr)
+    : m_settingsWriter(nullptr)
+    , m_mainScreen(nullptr)
     , m_wifiConfigScreen(nullptr)
     , m_jmriConfigScreen(nullptr)
     , m_wiThrottleClient(nullptr)
@@ -66,6 +69,12 @@ void AppController::initialise()
 {
     if (m_initialised) {
         return;
+    }
+
+    // First: every screen and the JMRI controller hand their NVS writes to it.
+    if (!m_settingsWriter) {
+        m_settingsWriter = std::make_unique<SettingsWriter>();
+        m_settingsWriter->start();
     }
 
     if (!m_wifiController) {
@@ -93,7 +102,8 @@ void AppController::initialise()
         m_jmriConnectionController = std::make_unique<JmriConnectionController>(
             m_jmriClient.get(),
             m_wiThrottleClient.get(),
-            m_wifiController.get());
+            m_wifiController.get(),
+            m_settingsWriter.get());
     }
 
     // Only the selected transport's stack is brought up. Auto-connecting
@@ -152,6 +162,9 @@ void AppController::initialise()
         m_rotaryEncoderHal->startPollingTask();
     }
 
+    // Nothing unless CONFIG_THROTTLE_STACK_REPORT is set (F-33).
+    StackReport::start();
+
     m_initialised = true;
 }
 
@@ -183,7 +196,8 @@ void AppController::showWiFiConfigScreen()
     }
 
     if (!m_wifiConfigScreen) {
-        m_wifiConfigScreen = std::make_unique<WiFiConfigScreen>(*manager);
+        m_wifiConfigScreen = std::make_unique<WiFiConfigScreen>(*manager,
+                                                                m_settingsWriter.get());
     }
     m_wifiConfigScreen->create();
 }
@@ -198,7 +212,8 @@ void AppController::showSettingsScreen()
                                                         m_wifiController.get(),
                                                         m_rotaryEncoderHal.get(),
                                                         m_jmriClient.get(),
-                                                        m_wiThrottleClient.get());
+                                                        m_wiThrottleClient.get(),
+                                                        m_settingsWriter.get());
     m_settingsScreen->create();
 }
 
@@ -223,7 +238,7 @@ void AppController::showOrchestratorConfigScreen()
         // The screen handles that and still lets the settings be edited, so a
         // switch can be configured before it is switched to.
         m_orchestratorConfigScreen = std::make_unique<OrchestratorConfigScreen>(
-            m_orchestratorClient.get(), m_wifiController.get());
+            m_orchestratorClient.get(), m_wifiController.get(), m_settingsWriter.get());
     }
     m_orchestratorConfigScreen->create();
 }
@@ -366,4 +381,9 @@ JmriConnectionController* AppController::getJmriConnectionController() const
 RotaryEncoderHal* AppController::getRotaryEncoderHal() const
 {
     return m_rotaryEncoderHal.get();
+}
+
+SettingsWriter* AppController::getSettingsWriter() const
+{
+    return m_settingsWriter.get();
 }

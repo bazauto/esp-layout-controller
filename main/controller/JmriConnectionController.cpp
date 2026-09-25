@@ -1,4 +1,5 @@
 #include "JmriConnectionController.h"
+#include "SettingsWriter.h"
 #include "WiFiController.h"
 #include "../communication/JmriJsonClient.h"
 #include "../communication/WiThrottleClient.h"
@@ -49,10 +50,12 @@ uint16_t parsePort(const char* text, uint16_t fallback)
 
 JmriConnectionController::JmriConnectionController(JmriJsonClient* jsonClient,
                                                    WiThrottleClient* wtClient,
-                                                   WiFiController* wifiController)
+                                                   WiFiController* wifiController,
+                                                   SettingsWriter* settingsWriter)
     : m_jsonClient(jsonClient)
     , m_wtClient(wtClient)
     , m_wifiController(wifiController)
+    , m_settingsWriter(settingsWriter)
     , m_mutex(nullptr)
     , m_autoReconnect(false)
     , m_request(Request::NONE)
@@ -160,16 +163,6 @@ void JmriConnectionController::saveJsonPort(uint16_t port)
     nvs_close(handle);
 }
 
-void JmriConnectionController::saveTask(void* arg)
-{
-    Settings* settings = static_cast<Settings*>(arg);
-    if (settings) {
-        saveSettings(*settings);
-        delete settings;
-    }
-    vTaskDelete(nullptr);
-}
-
 // --- Requests ---------------------------------------------------------------
 
 void JmriConnectionController::start()
@@ -226,12 +219,12 @@ void JmriConnectionController::requestConnect(const std::string& serverIp,
         // The orchestrator is the selected transport, and the device must not
         // sit retrying a server the operator did not choose. Keep the settings
         // for when WiThrottle is selected. Saved off the calling task, which is
-        // the LVGL task (F-05).
+        // the LVGL task (F-05), and in order with every other UI save (F-39).
         ESP_LOGW(TAG, "WiThrottle is not the selected transport; saving JMRI settings only");
-        auto* copy = new Settings(settings);
-        if (xTaskCreate(saveTask, "jmri_save", 3072, copy, 4, nullptr) != pdPASS) {
-            ESP_LOGE(TAG, "Failed to create JMRI settings save task");
-            delete copy;
+        if (m_settingsWriter) {
+            m_settingsWriter->post([settings]() { saveSettings(settings); });
+        } else {
+            ESP_LOGE(TAG, "No settings writer; JMRI settings not saved");
         }
         return;
     }

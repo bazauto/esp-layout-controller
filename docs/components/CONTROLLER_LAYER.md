@@ -12,6 +12,7 @@ Singleton (Meyer's pattern) that owns all shared services and manages screen lif
 
 | Object | Type | Purpose |
 |--------|------|---------|
+| `m_settingsWriter` | `unique_ptr<SettingsWriter>` | Every NVS write the UI asks for, off the LVGL task. Created first |
 | `m_wifiController` | `unique_ptr<WiFiController>` | WiFi lifecycle |
 | `m_wiThrottleClient` | `unique_ptr<WiThrottleClient>` | WiThrottle protocol |
 | `m_throttleBackend` | `unique_ptr<ThrottleBackend>` | The transport in use — held as the port, not the concrete adapter |
@@ -29,6 +30,31 @@ decides which network stack comes up at all:
 
 The backend is chosen once and never swapped on a live `ThrottleController` — doing so would
 strand locos mid-command — so a transport change takes effect on restart.
+
+---
+
+## SettingsWriter
+
+**File:** `main/controller/SettingsWriter.cpp/h`
+
+Carries out the UI's NVS writes on its own task, `settings_writer`, in the order they were
+asked for (F-39). An LVGL event handler must not block (F-05), and an NVS write can block
+when NVS has to erase a page first.
+
+It is one task and a queue, not a task per write. Two saves of one setting made in quick
+succession then land in the order they were made. For the same reason, work that must follow
+a save goes onto the same queue. The orchestrator screen's Connect, for example, posts the
+supervisor's wake-up after its save, so the login reads what was typed.
+
+| Caller | What it posts |
+|--------|---------------|
+| `SettingsScreen` | Speed steps per click; the transport choice (as a read-modify-write, on the writer) |
+| `OrchestratorConfigScreen` | Host, port and credential (read-modify-write); Connect's wake-up |
+| `WiFiConfigScreen` | Forget |
+| `JmriConnectionController` | The JMRI settings, when the orchestrator is the transport |
+
+`post()` runs the work on the caller's task, with a warning, if the queue is full or the
+writer never started. A stalled frame is better than a lost save.
 
 ---
 
@@ -136,6 +162,11 @@ void setUIUpdateCallback(void (*callback)(void*), void* userData);
 
 Fired after any state change. `MainScreen` registers this and calls `updateAllThrottles()` inside an LVGL lock.
 
+The function and its `userData` are held together in a `CallbackSlot` (`main/utils/`), set on
+the LVGL task and invoked from network and encoder tasks. The slot copies under its own lock
+and calls the copy with the lock released, so a caller never sees half of a pair being
+replaced (F-30). Every client callback slot works the same way.
+
 ### Thread Safety
 
 All public methods acquire `m_stateMutex` before accessing throttle/knob state. The LVGL port lock is **not** acquired inside `ThrottleController` — that's the UI's responsibility.
@@ -143,6 +174,10 @@ All public methods acquire `m_stateMutex` before accessing throttle/knob state. 
 The order is `lvgl_port_lock`, then `m_stateMutex`: the UI reads the controller while holding the LVGL lock, so the controller always releases its mutex before it sends a command or calls the UI (F-29).
 
 Knob input is refused in the controller while the backend reports the link down, because the physical encoders call `onKnobRotation` / `onKnobPress` directly (F-25). A speed or stop command that fails is rolled back in the model, unless a transport report has landed since.
+
+A transport report is applied only if it names the loco the throttle now holds. A late reply
+about the previous loco would otherwise set the new one's baseline. Speeds above 126 and
+function numbers above 28 are dropped too (F-37).
 
 ### Polling Task
 
@@ -185,7 +220,8 @@ Manages JMRI connection persistence (NVS settings) and automatic reconnection wi
 ### Constructor
 
 ```cpp
-JmriConnectionController(JmriJsonClient* json, WiThrottleClient* wt, WiFiController* wifi)
+JmriConnectionController(JmriJsonClient* json, WiThrottleClient* wt, WiFiController* wifi,
+                         SettingsWriter* writer)
 ```
 
 ### NVS Settings (namespace: `jmri`)
@@ -202,13 +238,12 @@ JmriConnectionController(JmriJsonClient* json, WiThrottleClient* wt, WiFiControl
 | Task | Stack | Purpose |
 |------|-------|---------|
 | `jmri_conn` | 6 KB | Every JMRI connect and disconnect: waits for WiFi indefinitely, connects both clients, reconnects with backoff (5 s → 60 s cap), carries out the config screen's requests |
-| `jmri_save` | 3 KB | One-shot: saves the JMRI screen's settings when the orchestrator is the transport and nothing may connect |
 
 ### Key Methods
 
 | Method | Description |
 |--------|-------------|
 | `start()` | Read NVS and start `jmri_conn`. Idempotent. WiThrottle transport only |
-| `requestConnect(ip, wtPort, powerMgr)` | Save these settings and (re)connect, on the worker. Returns at once |
+| `requestConnect(ip, wtPort, powerMgr)` | Save these settings and (re)connect, on the worker. Returns at once. Under the orchestrator it only saves, through the `SettingsWriter` |
 | `requestDisconnect()` | Disconnect both and stop reconnecting until the next connect. Returns at once |
 | `isBusy()` | True while a request is being carried out, for the screen's buttons |

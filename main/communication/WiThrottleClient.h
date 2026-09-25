@@ -4,11 +4,13 @@
 #include <vector>
 #include <map>
 #include <functional>
+#include <utility>
 #include "esp_err.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "CallbackSlot.h"
 
 /**
  * @brief WiThrottle Protocol Client for JMRI
@@ -220,32 +222,32 @@ public:
     /**
      * @brief Set power state change callback
      */
-    void setPowerStateCallback(PowerStateCallback callback) { m_powerCallback = callback; }
+    void setPowerStateCallback(PowerStateCallback callback) { m_powerCallback.set(std::move(callback)); }
     
     /**
      * @brief Set connection state change callback
      */
-    void setConnectionStateCallback(ConnectionStateCallback callback) { m_connectionCallback = callback; }
+    void setConnectionStateCallback(ConnectionStateCallback callback) { m_connectionCallback.set(std::move(callback)); }
     
     /**
      * @brief Set roster update callback
      */
-    void setRosterCallback(RosterCallback callback) { m_rosterCallback = callback; }
+    void setRosterCallback(RosterCallback callback) { m_rosterCallback.set(std::move(callback)); }
     
     /**
      * @brief Set web port discovery callback
      */
-    void setWebPortCallback(WebPortCallback callback) { m_webPortCallback = callback; }
+    void setWebPortCallback(WebPortCallback callback) { m_webPortCallback.set(std::move(callback)); }
     
     /**
      * @brief Set throttle state change callback
      */
-    void setThrottleStateCallback(ThrottleStateCallback callback) { m_throttleCallback = callback; }
+    void setThrottleStateCallback(ThrottleStateCallback callback) { m_throttleCallback.set(std::move(callback)); }
 
     /**
      * @brief Set function labels callback
      */
-    void setFunctionLabelsCallback(FunctionLabelsCallback callback) { m_functionLabelsCallback = callback; }
+    void setFunctionLabelsCallback(FunctionLabelsCallback callback) { m_functionLabelsCallback.set(std::move(callback)); }
 
     /**
     * @brief Get a copy of the current roster (thread-safe)
@@ -344,12 +346,13 @@ private:
     std::vector<Locomotive> m_roster;
     uint16_t m_webPort;
     
-    PowerStateCallback m_powerCallback;
-    ConnectionStateCallback m_connectionCallback;
-    RosterCallback m_rosterCallback;
-    WebPortCallback m_webPortCallback;
-    FunctionLabelsCallback m_functionLabelsCallback;
-    ThrottleStateCallback m_throttleCallback;
+    // Set on the LVGL or main task, invoked on the receive task (F-30).
+    CallbackSlot<void(const std::string&, PowerState)> m_powerCallback;
+    CallbackSlot<void(ConnectionState)> m_connectionCallback;
+    CallbackSlot<void(const std::vector<Locomotive>&)> m_rosterCallback;
+    CallbackSlot<void(uint16_t)> m_webPortCallback;
+    CallbackSlot<void(char, const std::vector<std::string>&)> m_functionLabelsCallback;
+    CallbackSlot<void(const ThrottleUpdate&)> m_throttleCallback;
 
     mutable SemaphoreHandle_t m_stateMutex;
     SemaphoreHandle_t m_sendMutex;

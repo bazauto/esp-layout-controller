@@ -302,12 +302,6 @@ void MainScreen::updateThrottle(int throttleId)
     // every knob dead.
     bool transportConnected = m_throttleController && m_throttleController->isConnected();
 
-    // Repainted here too, so the status label follows the same link state the
-    // knobs do rather than a separate client's.
-    if (m_powerStatusBar) {
-        m_powerStatusBar->refresh();
-    }
-
     // Hide function panel when entering roster selection
     if (snapshot.state == Throttle::State::SELECTING && m_functionPanel && m_functionPanel->isVisible()) {
         m_functionPanel->hide();
@@ -334,6 +328,12 @@ void MainScreen::updateAllThrottles()
 {
     for (int i = 0; i < 4; ++i) {
         updateThrottle(i);
+    }
+
+    // Once per repaint rather than once per throttle (F-38), and from the
+    // same link state the knobs are gated on rather than a separate client's.
+    if (m_powerStatusBar) {
+        m_powerStatusBar->refresh();
     }
 
     if (m_rosterCarousel) {
@@ -516,7 +516,7 @@ void MainScreen::onVirtualEncoderRotation(void* userData, int knobId, int delta)
     MainScreen* screen = static_cast<MainScreen*>(userData);
     if (!screen->m_throttleController) return;
     
-    ESP_LOGI(TAG, "Virtual encoder: knob %d rotated %+d", knobId, delta);
+    ESP_LOGD(TAG, "Virtual encoder: knob %d rotated %+d", knobId, delta);
     screen->m_throttleController->onKnobRotation(knobId, delta);
 }
 

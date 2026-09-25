@@ -40,11 +40,6 @@ WiThrottleClient::WiThrottleClient()
     , m_mainTrackPower(PowerState::UNKNOWN)
     , m_progTrackPower(PowerState::UNKNOWN)
     , m_webPort(0)
-    , m_powerCallback(nullptr)
-    , m_connectionCallback(nullptr)
-    , m_rosterCallback(nullptr)
-    , m_webPortCallback(nullptr)
-    , m_functionLabelsCallback(nullptr)
     , m_stateMutex(nullptr)
     , m_sendMutex(nullptr)
     , m_taskExitSemaphore(nullptr)
@@ -436,7 +431,7 @@ esp_err_t WiThrottleClient::setDirection(char throttleId, bool forward)
                          "A" + std::string(1, state.addressType) + std::to_string(state.address) +
                          "<;>R" + (forward ? "1" : "0");
     
-    ESP_LOGI(TAG, "Setting throttle %c direction: %s", throttleId, forward ? "FORWARD" : "REVERSE");
+    ESP_LOGD(TAG, "Setting throttle %c direction: %s", throttleId, forward ? "FORWARD" : "REVERSE");
     
     return sendCommand(command);
 }
@@ -720,7 +715,7 @@ void WiThrottleClient::receiveTask(void* arg)
 void WiThrottleClient::processMessage(const std::string& message)
 {
     // Log at debug level for normal operation
-    ESP_LOGI(TAG, "RX: %s", message.c_str());
+    ESP_LOGD(TAG, "RX: %s", message.c_str());
     
     if (message.empty()) {
         return;
@@ -736,9 +731,7 @@ void WiThrottleClient::processMessage(const std::string& message)
                 if (message.length() > 2) {
                     m_webPort = std::atoi(message.substr(2).c_str());
                     ESP_LOGI(TAG, "Discovered JSON web server port: %d", m_webPort);
-                    if (m_webPortCallback) {
-                        m_webPortCallback(m_webPort);
-                    }
+                    m_webPortCallback(m_webPort);
                 }
             } else if (message.length() > 1 && message[1] == 'P') {
                 // Power message (PPA)
@@ -816,13 +809,11 @@ void WiThrottleClient::handlePowerMessage(const std::string& message)
     m_progTrackPower = newState;
     
     // Notify callbacks
-    if (m_powerCallback) {
-        if (mainChanged) {
-            m_powerCallback("main", newState);
-        }
-        if (progChanged) {
-            m_powerCallback("prog", newState);
-        }
+    if (mainChanged) {
+        m_powerCallback("main", newState);
+    }
+    if (progChanged) {
+        m_powerCallback("prog", newState);
     }
 }
 
@@ -884,9 +875,7 @@ void WiThrottleClient::setState(ConnectionState newState)
         m_state = newState;
         ESP_LOGI(TAG, "Connection state changed: %d", (int)newState);
         
-        if (m_connectionCallback) {
-            m_connectionCallback(newState);
-        }
+        m_connectionCallback(newState);
     }
 }
 
@@ -963,8 +952,9 @@ void WiThrottleClient::handleRosterMessage(const std::string& message)
         // Expect ]\[ delimiter (3 characters: ], \, [)
         if (pos + 2 >= message.length() || 
             message[pos] != '\\' || message[pos + 1] != '[') {
-            ESP_LOGW(TAG, "Expected \\[ at position %d (got '%c%c')", 
-                     pos, message[pos], message[pos+1]);
+            // Not message[pos + 1]: pos can already be at the end (F-42).
+            ESP_LOGW(TAG, "Roster entry %d has no \\[ at offset %u",
+                     i + 1, static_cast<unsigned>(pos));
             break;
         }
         pos += 2; // Skip the \[
@@ -1017,9 +1007,7 @@ void WiThrottleClient::handleRosterMessage(const std::string& message)
     }
     
     // Notify callback with snapshot
-    if (m_rosterCallback) {
-        m_rosterCallback(newRoster);
-    }
+    m_rosterCallback(newRoster);
 }
 
 void WiThrottleClient::handleThrottleMessage(const std::string& message)
@@ -1071,9 +1059,7 @@ void WiThrottleClient::handleThrottleMessage(const std::string& message)
             labels.resize(29);
         }
 
-        if (m_functionLabelsCallback) {
-            m_functionLabelsCallback(throttleId, labels);
-        }
+        m_functionLabelsCallback(throttleId, labels);
         return;
     }
 
@@ -1149,7 +1135,5 @@ void WiThrottleClient::handleThrottleMessage(const std::string& message)
     }
     
     // Notify callback
-    if (m_throttleCallback) {
-        m_throttleCallback(update);
-    }
+    m_throttleCallback(update);
 }

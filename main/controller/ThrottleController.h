@@ -2,6 +2,7 @@
 
 #include "Knob.h"
 #include "Throttle.h"
+#include "CallbackSlot.h"
 #include "ThrottleBackend.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -260,11 +261,11 @@ private:
 
     mutable SemaphoreHandle_t m_stateMutex;
     
-    void (*m_uiUpdateCallback)(void*);
-    void* m_uiUpdateUserData;
-
-    void (*m_trackPowerCallback)(void*, ThrottleBackend::TrackPower);
-    void* m_trackPowerUserData;
+    // Set by the UI on the LVGL task, invoked from network and encoder tasks.
+    // Each slot holds the function and its userData as one closure, so a
+    // caller can never see one half of a pair being replaced (F-30).
+    CallbackSlot<void()> m_uiUpdateCallback;
+    CallbackSlot<void(ThrottleBackend::TrackPower)> m_trackPowerCallback;
     
     TaskHandle_t m_pollingTask;
     bool m_pollingRunning;

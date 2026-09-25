@@ -17,6 +17,7 @@ class OrchestratorConfigScreen;
 class WiFiController;
 class JmriConnectionController;
 class RotaryEncoderHal;
+class SettingsWriter;
 
 /**
  * @brief Application-level controller that owns shared state and services.
@@ -56,6 +57,7 @@ public:
     WiFiController* getWiFiController() const;
     JmriConnectionController* getJmriConnectionController() const;
     RotaryEncoderHal* getRotaryEncoderHal() const;
+    SettingsWriter* getSettingsWriter() const;
 
 private:
     AppController();
@@ -72,6 +74,8 @@ private:
      */
     static void orchestratorConnectTask(void* arg);
 
+    /** Declared first, so it outlives everything holding a pointer to it. */
+    std::unique_ptr<SettingsWriter> m_settingsWriter;
     std::unique_ptr<MainScreen> m_mainScreen;
     std::unique_ptr<WiFiConfigScreen> m_wifiConfigScreen;
     std::unique_ptr<SettingsScreen> m_settingsScreen;

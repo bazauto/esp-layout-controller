@@ -68,6 +68,12 @@ from the polling task, so every method must be safe on more than one task. Callb
 whichever task the transport receives on — never assume the LVGL task, and take
 `lvgl_port_lock` before touching a widget from one.
 
+Every callback slot, on the backends and on the clients beneath them, is a `CallbackSlot`
+(`main/utils/CallbackSlot.h`). It is set under its own lock, and the callback is invoked as a
+copy with that lock released (F-30). Clearing a slot does not wait for a call already in
+flight, so whatever a callback reaches must outlive the clear — one reason `MainScreen` is
+never destroyed.
+
 ---
 
 ## WiThrottleBackend
@@ -151,6 +157,11 @@ Refused, each with a log line and no callback:
 
 Within a `STATE_SNAPSHOT`, one bad loco entry is skipped without costing the rest.
 
+A message split across frames (a text frame without FIN, then continuations) is reassembled
+before it is parsed, up to 24 KB. The receive buffer used to be cleared at every frame's
+start, which parsed each fragment alone and refused them all (F-42). The connection, system
+and track-power states are atomics, so no lock timeout can lose a change.
+
 ### Roster and track power are REST, not WebSocket
 
 The `ClientMessage` union has no track-power member and the snapshot carries loco state keyed
@@ -161,8 +172,26 @@ by address but no names, so both are HTTP:
 | Roster | `GET /api/layouts/{id}/locos` |
 | Track power | `POST /api/layouts/{id}/dcc-link/power` with `{"on": bool}` |
 
-The layout id comes from `GET /api/layouts`, fetched once and cached. The roster is built
-aside and swapped in, so a partly-built roster is never visible to the carousel.
+The layout id comes from `GET /api/layouts`, fetched once per login and cached; a new host
+never inherits the old one's id. The orchestrator runs one layout, and the first is used —
+with a warning if there is ever more than one (F-42).
+
+The roster is **streamed**. `JsonArraySplitter` hands over each loco record as its closing
+brace arrives, and each is parsed with cJSON on its own, so memory is bounded by one record
+rather than by a response buffer. The old 8 KB buffer refused any roster above about 35 locos
+whole (F-35). The limits are 4 KB per record, with room for the function labels the
+orchestrator is gaining, and 128 locos:
+
+| What arrives | What happens |
+|--------------|--------------|
+| A record over 4 KB | That loco is skipped, with a warning |
+| A record with no positive address | That loco is skipped, as before |
+| More than 128 locos | The first 128 are kept, with a warning |
+| A record cJSON cannot parse, or a stream that is not an array of objects | The whole roster is refused |
+| A stream that stops before its closing `]` | The whole roster is refused |
+
+The roster is built aside and swapped in, so a partly-built roster is never visible to the
+carousel.
 
 The power POST's **reply body is deliberately ignored**. The `DCC_LINK` event pushed the
 moment it lands is what tells us the truth — that is the route's own contract, not our
@@ -360,6 +389,8 @@ off (F-23).
   descriptor lwIP has already handed to another socket.
 - `m_stateMutex`: protects internal `m_throttleStates` map.
 - All callbacks fire from the receive task — callers must handle their own locking.
+- Each received line is logged at DEBUG, not INFO: a console write per line blocked this
+  task (F-38).
 
 ### Protocol Messages Parsed
 
@@ -398,7 +429,6 @@ Same as WiThrottleClient: `DISCONNECTED → CONNECTING → CONNECTED / FAILED`.
 | `disconnect()` | Close WebSocket |
 | `setPower(bool on)` | Send power command for configured power manager |
 | `getPower()` | Request current power state |
-| `requestPowerList()` | Request all power managers |
 | `startHeartbeat()` | Spawn heartbeat task (ping every 30 s) |
 | `stopHeartbeat()` | Stop heartbeat task and wait for it to exit (join, then delete). Up to about a second when the task is mid-send (F-31) |
 | `setConfiguredPowerName(name)` | Set power manager name (e.g. `"DCC++"`) |

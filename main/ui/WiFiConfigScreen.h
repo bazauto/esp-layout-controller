@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+class SettingsWriter;
+
 /**
  * @brief WiFi configuration screen for network setup
  * 
@@ -19,7 +21,7 @@
  */
 class WiFiConfigScreen {
 public:
-    WiFiConfigScreen(WiFiManager& wifiManager);
+    WiFiConfigScreen(WiFiManager& wifiManager, SettingsWriter* settingsWriter);
     ~WiFiConfigScreen();
     
     // Delete copy/move constructors
@@ -61,6 +63,8 @@ private:
     
     // WiFi manager reference
     WiFiManager& m_wifiManager;
+    /** NVS writes go here, never onto the LVGL task (F-39). */
+    SettingsWriter* m_settingsWriter;
     
     // Cached scan results
     std::vector<std::string> m_scanResults;

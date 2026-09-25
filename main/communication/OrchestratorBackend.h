@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "CallbackSlot.h"
 #include "OrchestratorClient.h"
 #include "ThrottleBackend.h"
 #include "freertos/FreeRTOS.h"
@@ -113,17 +114,16 @@ private:
                            const OrchestratorClient::LocoState& state,
                            const ThrottleStateCallback& callback);
 
-    ThrottleStateCallback copyThrottleStateCallback() const;
-
     bool lock(TickType_t timeout) const;
     void unlock() const;
 
     OrchestratorClient* m_client;
     std::array<Assignment, MAX_THROTTLES> m_assignments;
 
-    ThrottleStateCallback m_throttleStateCallback;
-    ConnectionStateCallback m_connectionStateCallback;
-    TrackPowerCallback m_trackPowerCallback;
+    // Set on the main task, invoked on the client's tasks (F-30).
+    CallbackSlot<void(const ThrottleUpdate&)> m_throttleStateCallback;
+    CallbackSlot<void(ConnectionState)> m_connectionStateCallback;
+    CallbackSlot<void(TrackPower)> m_trackPowerCallback;
 
     mutable SemaphoreHandle_t m_mutex;
 };

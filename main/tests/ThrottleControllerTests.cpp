@@ -1,4 +1,6 @@
 #include "unity.h"
+
+#include "CallbackSlot.h"
 #include "ThrottleController.h"
 #include "ThrottleBackend.h"
 #include "Locomotive.h"
@@ -396,6 +398,73 @@ static void test_controller_applies_backend_throttle_update(void)
     TEST_ASSERT_FALSE(throttle->getDirection());
 }
 
+static void test_controller_ignores_update_for_other_loco(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+    setupThrottleWithLoco(controller, 1, 0, "LocoQ", 90);
+    Throttle* throttle = controller.getThrottle(1);
+    TEST_ASSERT_NOT_NULL(throttle);
+    throttle->setSpeed(10);
+
+    // A late reply about the loco this throttle held before must not become
+    // the new loco's baseline (F-37).
+    ThrottleBackend::ThrottleUpdate update;
+    update.throttleId = 1;
+    update.address = 55;
+    update.speed = 80;
+    backend.emitThrottleUpdate(update);
+    TEST_ASSERT_EQUAL_INT(10, throttle->getCurrentSpeed());
+
+    update.address = 90;
+    backend.emitThrottleUpdate(update);
+    TEST_ASSERT_EQUAL_INT(80, throttle->getCurrentSpeed());
+}
+
+static void test_controller_bounds_reported_speed_and_function(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+    setupThrottleWithLoco(controller, 2, 0, "LocoR", 91);
+    Throttle* throttle = controller.getThrottle(2);
+    TEST_ASSERT_NOT_NULL(throttle);
+    throttle->setSpeed(20);
+    const size_t functionsBefore = throttle->getFunctions().size();
+
+    ThrottleBackend::ThrottleUpdate update;
+    update.throttleId = 2;
+    update.address = 91;
+    update.speed = 500;
+    backend.emitThrottleUpdate(update);
+    TEST_ASSERT_EQUAL_INT(20, throttle->getCurrentSpeed());
+
+    // Each new function number grows the list and the panel (F-37).
+    update.speed = -1;
+    update.function = 9999;
+    update.functionState = true;
+    backend.emitThrottleUpdate(update);
+    TEST_ASSERT_EQUAL_INT((int)functionsBefore, (int)throttle->getFunctions().size());
+}
+
+static void test_callback_slot_invokes_a_copy(void)
+{
+    CallbackSlot<void(int)> slot;
+    int total = 0;
+
+    slot(1);  // unset: nothing happens
+    slot.set([&total](int value) { total += value; });
+    slot(2);
+
+    // The copy survives the slot being cleared under it (F-30).
+    auto copy = slot.get();
+    slot.clear();
+    slot(4);
+    TEST_ASSERT_TRUE(static_cast<bool>(copy));
+    copy(8);
+
+    TEST_ASSERT_EQUAL_INT(10, total);
+}
+
 static void test_controller_roster_comes_from_backend(void)
 {
     FakeThrottleBackend backend;
@@ -727,4 +796,7 @@ extern "C" void register_controller_tests(void)
     RUN_TEST(test_controller_function_press_release_for_event_backend);
     RUN_TEST(test_controller_function_toggles_for_state_backend);
     RUN_TEST(test_controller_emergency_stop);
+    RUN_TEST(test_controller_ignores_update_for_other_loco);
+    RUN_TEST(test_controller_bounds_reported_speed_and_function);
+    RUN_TEST(test_callback_slot_invokes_a_copy);
 }

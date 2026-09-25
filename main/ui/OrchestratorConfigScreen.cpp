@@ -3,6 +3,7 @@
 
 #include "../communication/OrchestratorClient.h"
 #include "../controller/AppController.h"
+#include "../controller/SettingsWriter.h"
 #include "../controller/WiFiController.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -18,7 +19,8 @@ constexpr int SCREEN_HEIGHT = 480;
 }  // namespace
 
 OrchestratorConfigScreen::OrchestratorConfigScreen(OrchestratorClient* client,
-                                                   WiFiController* wifiController)
+                                                   WiFiController* wifiController,
+                                                   SettingsWriter* settingsWriter)
     : m_screen(nullptr)
     , m_hostInput(nullptr)
     , m_portInput(nullptr)
@@ -30,6 +32,7 @@ OrchestratorConfigScreen::OrchestratorConfigScreen(OrchestratorClient* client,
     , m_statusTimer(nullptr)
     , m_client(client)
     , m_wifiController(wifiController)
+    , m_settingsWriter(settingsWriter)
 {
 }
 
@@ -280,23 +283,36 @@ void OrchestratorConfigScreen::loadSettings()
 
 void OrchestratorConfigScreen::saveSettings()
 {
-    // Read-modify-write: the transport *choice* is owned by the settings
-    // screen, so loading first stops saving here from silently reverting it.
-    TransportSettings settings = TransportSettings::load();
+    // Read here, on the LVGL task: the widgets are LVGL's.
+    const std::string host = textOf(m_hostInput);
+    const std::string username = textOf(m_usernameInput);
+    const std::string password = textOf(m_passwordInput);
 
-    settings.host = textOf(m_hostInput);
-    settings.username = textOf(m_usernameInput);
-    settings.password = textOf(m_passwordInput);
-
+    long port = 0;
     const std::string portText = textOf(m_portInput);
     if (!portText.empty()) {
-        const long port = strtol(portText.c_str(), nullptr, 10);
+        port = strtol(portText.c_str(), nullptr, 10);
+    }
+
+    if (!m_settingsWriter) {
+        ESP_LOGE(TAG, "No settings writer; orchestrator settings not saved");
+        return;
+    }
+
+    // Written off the LVGL task (F-39). Read-modify-write, and all of it on
+    // the writer: the transport *choice* is owned by the settings screen, and
+    // loading at the moment of writing stops this reverting it.
+    m_settingsWriter->post([host, username, password, port]() {
+        TransportSettings settings = TransportSettings::load();
+        settings.host = host;
+        settings.username = username;
+        settings.password = password;
         if (port > 0 && port <= 65535) {
             settings.port = static_cast<uint16_t>(port);
         }
-    }
-
-    settings.save();
+        settings.save();
+        ESP_LOGI(TAG, "Orchestrator settings saved");
+    });
 }
 
 void OrchestratorConfigScreen::updateStatus()
@@ -351,7 +367,6 @@ void OrchestratorConfigScreen::onSaveClicked(lv_event_t* e)
     }
     self->hideKeyboard();
     self->saveSettings();
-    ESP_LOGI(TAG, "Orchestrator settings saved");
 }
 
 void OrchestratorConfigScreen::onConnectClicked(lv_event_t* e)
@@ -371,8 +386,13 @@ void OrchestratorConfigScreen::onConnectClicked(lv_event_t* e)
 
     // The supervising task logs in with the settings just saved. Connecting
     // from a task of this screen's own raced that supervisor for the same
-    // client (F-24, F-26); the status timer shows the result.
-    AppController::instance().requestOrchestratorReconnect();
+    // client (F-24, F-26); the status timer shows the result. Posted behind
+    // the save, so the login reads what was typed rather than what was there.
+    if (self->m_settingsWriter) {
+        self->m_settingsWriter->post([]() {
+            AppController::instance().requestOrchestratorReconnect();
+        });
+    }
 }
 
 void OrchestratorConfigScreen::onBackClicked(lv_event_t* e)

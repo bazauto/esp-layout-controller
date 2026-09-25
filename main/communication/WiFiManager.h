@@ -3,6 +3,7 @@
 #include <atomic>
 #include <string>
 #include <functional>
+#include "CallbackSlot.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_timer.h"
@@ -143,7 +144,8 @@ private:
     static constexpr uint32_t SLOW_RETRY_MAX_MS = 60000;
 
     State m_state;
-    StateCallback m_stateCallback;
+    /** Set on the LVGL or main task, invoked on the event loop task (F-30). */
+    CallbackSlot<void(State, const std::string&)> m_stateCallback;
     std::atomic<int> m_retryCount;
     int m_slowRetryCount;
     bool m_initialized;

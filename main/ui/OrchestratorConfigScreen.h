@@ -7,6 +7,7 @@
 
 class OrchestratorClient;
 class WiFiController;
+class SettingsWriter;
 
 /**
  * @brief Layout orchestrator connection settings.
@@ -21,7 +22,8 @@ class WiFiController;
  */
 class OrchestratorConfigScreen {
 public:
-    OrchestratorConfigScreen(OrchestratorClient* client, WiFiController* wifiController);
+    OrchestratorConfigScreen(OrchestratorClient* client, WiFiController* wifiController,
+                             SettingsWriter* settingsWriter);
     ~OrchestratorConfigScreen();
 
     OrchestratorConfigScreen(const OrchestratorConfigScreen&) = delete;
@@ -69,6 +71,8 @@ private:
 
     OrchestratorClient* m_client;
     WiFiController* m_wifiController;
+    /** NVS writes go here, never onto the LVGL task (F-39). */
+    SettingsWriter* m_settingsWriter;
 
     static constexpr int PADDING = 10;
     static constexpr int BUTTON_HEIGHT = 50;

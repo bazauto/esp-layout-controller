@@ -11,6 +11,7 @@
 class JmriJsonClient;
 class WiThrottleClient;
 class WiFiController;
+class SettingsWriter;
 
 /**
  * @brief Owns the JMRI connection: its saved settings, its reconnection, and
@@ -28,7 +29,8 @@ class WiFiController;
  */
 class JmriConnectionController {
 public:
-    JmriConnectionController(JmriJsonClient* jsonClient, WiThrottleClient* wtClient, WiFiController* wifiController);
+    JmriConnectionController(JmriJsonClient* jsonClient, WiThrottleClient* wtClient,
+                             WiFiController* wifiController, SettingsWriter* settingsWriter);
     ~JmriConnectionController();
 
     JmriConnectionController(const JmriConnectionController&) = delete;
@@ -78,7 +80,6 @@ private:
     static Settings loadSettings();
     static void saveSettings(const Settings& settings);
     static void saveJsonPort(uint16_t port);
-    static void saveTask(void* arg);
 
     static void workerTask(void* arg);
     void runWorker();
@@ -90,6 +91,7 @@ private:
     JmriJsonClient* m_jsonClient;
     WiThrottleClient* m_wtClient;
     WiFiController* m_wifiController;
+    SettingsWriter* m_settingsWriter;
 
     // Guarded by m_mutex: written by the requesting task, read by the worker.
     mutable SemaphoreHandle_t m_mutex;

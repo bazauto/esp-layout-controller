@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CallbackSlot.h"
 #include "JmriJsonClient.h"
 #include "ThrottleBackend.h"
 #include "WiThrottleClient.h"
@@ -77,8 +78,9 @@ private:
 
     // Held so the lambdas registered on the client stay valid, and so a second
     // setThrottleStateCallback replaces the first rather than stacking.
-    ThrottleStateCallback m_throttleStateCallback;
-    FunctionLabelsCallback m_functionLabelsCallback;
-    ConnectionStateCallback m_connectionStateCallback;
-    TrackPowerCallback m_trackPowerCallback;
+    // Set on the main task, invoked on the clients' tasks (F-30).
+    CallbackSlot<void(const ThrottleUpdate&)> m_throttleStateCallback;
+    CallbackSlot<void(int, const std::vector<std::string>&)> m_functionLabelsCallback;
+    CallbackSlot<void(ConnectionState)> m_connectionStateCallback;
+    CallbackSlot<void(TrackPower)> m_trackPowerCallback;
 };

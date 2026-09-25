@@ -169,7 +169,7 @@ flowchart TD
   worker saves it as `json_port` and moves the JSON client if it changed. Connecting the JSON
   client from the receive task raced the reconnect task (F-34).
 - **Under the orchestrator** the task is never started, and Connect on the JMRI screen only
-  saves the settings, on a one-shot `jmri_save` task.
+  saves the settings, through the `SettingsWriter` (F-39).
 
 ## WiFi Config Screen
 

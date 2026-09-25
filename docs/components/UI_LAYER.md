@@ -103,7 +103,8 @@ the bottom. Every screen follows it.
 - SSID/password input with LVGL keyboard
 - Connect / disconnect / forget network
 - Status display (IP address, connection state)
-- Credentials saved to NVS via `WiFiManager`
+- Credentials saved to NVS by `WiFiManager` once they have produced an IP address; Forget
+  goes through the `SettingsWriter`, off the LVGL task
 
 **Navigation:** Back button → `close_wifi_config_screen()` → `show_main_screen()`
 
@@ -171,8 +172,9 @@ transports are peers, and this one needs four fields including a credential.
 The password field is masked on screen. It is still plaintext in NVS — the accepted F-18
 risk.
 
-**Connect flow:** Save & Connect writes NVS, then wakes the `orch_connect` supervisor, which
-logs in with the saved settings and fetches the roster. The login is a blocking HTTP round
+**Connect flow:** Save & Connect queues the save on the `SettingsWriter`, then queues the
+wake-up of the `orch_connect` supervisor behind it (F-39). The supervisor logs in with the
+saved settings and fetches the roster. The login is a blocking HTTP round
 trip; running it on the LVGL task would freeze every throttle at once (F-05). The screen
 used to run its own connect task, which raced the supervisor for the same client.
 

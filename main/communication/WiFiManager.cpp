@@ -4,10 +4,10 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include <cstring>
+#include <utility>
 
 WiFiManager::WiFiManager()
     : m_state(State::DISCONNECTED)
-    , m_stateCallback(nullptr)
     , m_retryCount(0)
     , m_slowRetryCount(0)
     , m_initialized(false)
@@ -275,7 +275,7 @@ void WiFiManager::clearStoredCredentials()
 
 void WiFiManager::setStateCallback(StateCallback callback)
 {
-    m_stateCallback = callback;
+    m_stateCallback.set(std::move(callback));
 }
 
 esp_err_t WiFiManager::startScan()
@@ -449,9 +449,10 @@ void WiFiManager::setState(State newState)
     if (m_state != newState) {
         m_state = newState;
         
-        if (m_stateCallback) {
+        StateCallback callback = m_stateCallback.get();
+        if (callback) {
             std::string ip = (newState == State::CONNECTED) ? getIpAddress() : "";
-            m_stateCallback(newState, ip);
+            callback(newState, ip);
         }
     }
 }

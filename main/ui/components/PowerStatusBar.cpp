@@ -19,6 +19,8 @@ PowerStatusBar::PowerStatusBar()
     , m_trackPowerButton(nullptr)
     , m_connectionStatusLabel(nullptr)
     , m_throttleController(nullptr)
+    , m_drawnTrackPower(-1)
+    , m_drawnConnected(-1)
 {
 }
 
@@ -125,6 +127,11 @@ void PowerStatusBar::updateTrackPowerButton(ThrottleBackend::TrackPower state)
     lv_obj_t* label = lv_obj_get_child(m_trackPowerButton, 0);
     if (!label) return;
 
+    if (static_cast<int>(state) == m_drawnTrackPower) {
+        return;
+    }
+    m_drawnTrackPower = static_cast<int>(state);
+
     uint32_t color;
     const char* stateText;
 
@@ -152,6 +159,11 @@ void PowerStatusBar::updateTrackPowerButton(ThrottleBackend::TrackPower state)
 void PowerStatusBar::updateConnectionStatus(bool connected)
 {
     if (!m_connectionStatusLabel) return;
+
+    if (static_cast<int>(connected) == m_drawnConnected) {
+        return;
+    }
+    m_drawnConnected = static_cast<int>(connected);
 
     const char* icon = connected ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE;
     const char* text = connected ? " Connected" : " Disconnected";

@@ -25,6 +25,12 @@ HAL for 2× Adafruit I2C QT Rotary Encoders using the Seesaw protocol over I2C. 
 | Encoder delta | `0x11` | `0x40` | Read as int32, auto-resets on read |
 | GPIO bulk | `0x01` | `0x04` | Read 4 bytes, bit 24 = button (active low) |
 
+Each read is two I²C transactions: write the base and offset, wait 500 µs, then read. That is
+the sequence the Seesaw expects, and the one Adafruit's own library uses (with 250 µs). The
+HAL used to send a combined write-read with no gap, which left the Seesaw no time to prepare
+its answer, and made up for it by reading every register twice. Because the delta register
+resets on each read, any rotation between the two reads was lost (F-41).
+
 ### API
 
 | Method | Description |

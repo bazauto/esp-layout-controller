@@ -1,5 +1,7 @@
 #include "WiFiConfigScreen.h"
 #include "UiTheme.h"
+#include "../controller/SettingsWriter.h"
+#include "../utils/StackReport.h"
 #include "wrappers/wifi_config_wrapper.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -20,7 +22,7 @@ static const int SCREEN_HEIGHT = 480;
 static const int PADDING = 10;
 static const int BUTTON_HEIGHT = 50;
 
-WiFiConfigScreen::WiFiConfigScreen(WiFiManager& wifiManager)
+WiFiConfigScreen::WiFiConfigScreen(WiFiManager& wifiManager, SettingsWriter* settingsWriter)
     : m_screen(nullptr)
     , m_statusLabel(nullptr)
     , m_ssidLabel(nullptr)
@@ -36,6 +38,7 @@ WiFiConfigScreen::WiFiConfigScreen(WiFiManager& wifiManager)
     , m_keyboard(nullptr)
     , m_keyboardLabel(nullptr)
     , m_wifiManager(wifiManager)
+    , m_settingsWriter(settingsWriter)
     , m_scanInProgress(false)
 {
 }
@@ -423,6 +426,7 @@ void WiFiConfigScreen::scanTask(void* arg)
             }
 
             lvgl_port_unlock();
+            StackReport::logSelf();
             vTaskDelete(nullptr);
             return;
         }
@@ -430,6 +434,7 @@ void WiFiConfigScreen::scanTask(void* arg)
     }
 
     screen->m_scanInProgress.store(false);
+    StackReport::logSelf();
     vTaskDelete(nullptr);
 }
 
@@ -495,7 +500,14 @@ void WiFiConfigScreen::disconnectWiFi()
 void WiFiConfigScreen::forgetWiFi()
 {
     ESP_LOGI(TAG, "Forgetting WiFi network and disconnecting");
-    m_wifiManager.forgetNetwork();
+    // Erases NVS keys, so off the LVGL task (F-39). The status label follows
+    // the manager's state callback once the disconnect lands.
+    WiFiManager* manager = &m_wifiManager;
+    if (m_settingsWriter) {
+        m_settingsWriter->post([manager]() { manager->forgetNetwork(); });
+    } else {
+        manager->forgetNetwork();
+    }
     updateStatus();
 }
 

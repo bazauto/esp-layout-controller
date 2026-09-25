@@ -6,6 +6,9 @@ set(APP_SRCS
     # Application entry (C)
     "main.c"
     
+    # Utilities (C++)
+    "utils/StackReport.cpp"
+
     # Model layer (C++)
     "model/Locomotive.cpp"
     "model/Throttle.cpp"
@@ -20,12 +23,14 @@ set(APP_SRCS
     "controller/WiFiController.cpp"
     "controller/JmriConnectionController.cpp"
     "controller/TransportSettings.cpp"
+    "controller/SettingsWriter.cpp"
     
     # Communication layer (C++)
     "communication/WiFiManager.cpp"
     "communication/WiThrottleClient.cpp"
     "communication/WiThrottleBackend.cpp"
     "communication/OrchestratorClient.cpp"
+    "communication/JsonArraySplitter.cpp"
     "communication/OrchestratorBackend.cpp"
     "communication/JmriJsonClient.cpp"
     

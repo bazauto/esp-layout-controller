@@ -156,6 +156,9 @@ private:
     bool m_animRunning;
     int m_assignedKnob;              // -1, 0, or 1
     bool m_knobAvailable[2];         // Availability for each knob
+    /** What each indicator last showed, so a repaint that changes nothing
+     * sets no style (F-38). -1 until first drawn. */
+    int m_drawnIndicatorLook[2];
     bool m_forwardDirection;         // true=forward, false=reverse
     void* m_userData;                 // User data for callbacks
 

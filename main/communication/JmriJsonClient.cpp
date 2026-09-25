@@ -61,8 +61,6 @@ JmriJsonClient::JmriJsonClient()
     , m_heartbeatRunning(false)
     , m_configuredPowerName("DCC++")
     , m_powerMutex(nullptr)
-    , m_powerCallback(nullptr)
-    , m_connectionCallback(nullptr)
 {
     m_powerMutex = xSemaphoreCreateMutex();
     if (!m_powerMutex) {
@@ -196,7 +194,8 @@ esp_err_t JmriJsonClient::setPower(bool on)
         return ESP_ERR_INVALID_STATE;
     }
     
-    if (m_configuredPowerName.empty()) {
+    const std::string powerName = getConfiguredPowerName();
+    if (powerName.empty()) {
         ESP_LOGW(TAG, "No power manager configured");
         return ESP_ERR_INVALID_STATE;
     }
@@ -206,11 +205,31 @@ esp_err_t JmriJsonClient::setPower(bool on)
     // state: 0=unknown, 1=on, 2=off
     int state = on ? 2 : 4;  // JMRI uses 2=ON, 4=OFF
     
-    std::string data = "{\"name\":\"" + escapeJson(m_configuredPowerName) + "\",\"state\":" + std::to_string(state) + "}";
+    std::string data = "{\"name\":\"" + escapeJson(powerName) + "\",\"state\":" + std::to_string(state) + "}";
     
-    ESP_LOGI(TAG, "Setting power '%s': %s", m_configuredPowerName.c_str(), on ? "ON" : "OFF");
+    ESP_LOGI(TAG, "Setting power '%s': %s", powerName.c_str(), on ? "ON" : "OFF");
     
     return sendJsonCommand("power", data);
+}
+
+void JmriJsonClient::setConfiguredPowerName(const std::string& powerName)
+{
+    if (m_powerMutex && xSemaphoreTake(m_powerMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        m_configuredPowerName = powerName;
+        xSemaphoreGive(m_powerMutex);
+    } else {
+        ESP_LOGE(TAG, "Could not lock to set the power manager name");
+    }
+}
+
+std::string JmriJsonClient::getConfiguredPowerName() const
+{
+    std::string name;
+    if (m_powerMutex && xSemaphoreTake(m_powerMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        name = m_configuredPowerName;
+        xSemaphoreGive(m_powerMutex);
+    }
+    return name;
 }
 
 JmriJsonClient::PowerState JmriJsonClient::getPower() const
@@ -224,34 +243,6 @@ JmriJsonClient::PowerState JmriJsonClient::getPower() const
         xSemaphoreGive(m_powerMutex);
     }
     return result;
-}
-
-esp_err_t JmriJsonClient::requestPowerList()
-{
-    if (!isConnected()) {
-        ESP_LOGW(TAG, "Not connected to server");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (!m_client) {
-        ESP_LOGE(TAG, "WebSocket client is null");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    // Request list of all power managers
-    // {"type":"power","method":"list"}
-    std::string message = "{\"type\":\"power\",\"method\":\"list\"}";
-    
-    ESP_LOGD(TAG, "Sending power list request: %s", message.c_str());
-    
-    esp_err_t err = esp_websocket_client_send_text(m_client, message.c_str(), message.length(), portMAX_DELAY);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to send power list request: %s (%d)", esp_err_to_name(err), err);
-        return err;
-    }
-    
-    ESP_LOGI(TAG, "Power list request sent successfully");
-    return ESP_OK;
 }
 
 void JmriJsonClient::sendHeartbeat()
@@ -330,10 +321,11 @@ void JmriJsonClient::processMessage(const std::string& message)
         // Small delay to ensure WebSocket is fully ready for bidirectional communication
         vTaskDelay(pdMS_TO_TICKS(200));
         // Subscribe to power state updates for our configured power manager
+        const std::string powerName = getConfiguredPowerName();
         std::string subscribeMsg = "{\"type\":\"power\",\"data\":{\"name\":\"" + 
-                                   escapeJson(m_configuredPowerName) + "\"},\"method\":\"get\"}";
+                                   escapeJson(powerName) + "\"},\"method\":\"get\"}";
         esp_websocket_client_send_text(m_client, subscribeMsg.c_str(), subscribeMsg.length(), pdMS_TO_TICKS(1000));
-        ESP_LOGI(TAG, "Subscribed to power updates for '%s'", m_configuredPowerName.c_str());
+        ESP_LOGI(TAG, "Subscribed to power updates for '%s'", powerName.c_str());
     }
 }
 
@@ -366,17 +358,19 @@ void JmriJsonClient::handlePowerMessage(const std::string& type, const std::stri
     
     // Update cached state
     bool stateChanged = false;
+    bool isConfigured = false;
     if (m_powerMutex && xSemaphoreTake(m_powerMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         auto it = m_powerStates.find(name);
         if (it == m_powerStates.end() || it->second != newState) {
             m_powerStates[name] = newState;
             stateChanged = true;
         }
+        isConfigured = (name == m_configuredPowerName);
         xSemaphoreGive(m_powerMutex);
     }
     
     // Only notify callback for the configured power manager
-    if (stateChanged && m_powerCallback && name == m_configuredPowerName) {
+    if (stateChanged && isConfigured) {
         m_powerCallback(name, newState);
     }
 }
@@ -387,9 +381,7 @@ void JmriJsonClient::setState(ConnectionState newState)
         m_state = newState;
         ESP_LOGI(TAG, "Connection state changed: %d", (int)newState);
         
-        if (m_connectionCallback) {
-            m_connectionCallback(newState);
-        }
+        m_connectionCallback(newState);
     }
 }
 

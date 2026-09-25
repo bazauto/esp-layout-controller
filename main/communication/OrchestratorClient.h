@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <string>
@@ -9,6 +10,7 @@
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "CallbackSlot.h"
 
 /**
  * @brief Client for the layout orchestrator's WebSocket control plane.
@@ -300,7 +302,10 @@ private:
      */
     esp_websocket_client_handle_t m_client;
     mutable SemaphoreHandle_t m_clientMutex;
-    ConnectionState m_state;
+
+    /** Atomic rather than under the state mutex, so no lock timeout can lose
+     * a change: whether the link is up gates the knobs (F-42). */
+    std::atomic<ConnectionState> m_state;
 
     std::string m_host;
     uint16_t m_port;
@@ -309,22 +314,28 @@ private:
     std::string m_cookieHeader;
     std::string m_uri;
 
-    /** Reassembly buffer for frames split across events. */
+    /** Reassembly buffer for a message split across events or frames.
+     * Touched only on the WebSocket task, and by disconnect() once that task
+     * has been destroyed. */
     std::string m_rxBuffer;
+    /** A text frame has opened a message that its FIN frame has not closed. */
+    bool m_rxInMessage;
 
-    SystemStatus m_systemStatus;
-    TrackPower m_trackPower;
+    std::atomic<SystemStatus> m_systemStatus;
+    std::atomic<TrackPower> m_trackPower;
     std::string m_layoutId;
     std::vector<RosterEntry> m_roster;
     std::map<int, CachedLocoState> m_locoStates;
     int64_t m_lastMessageUs;
 
-    ConnectionStateCallback m_connectionCallback;
-    LocoStateCallback m_locoStateCallback;
-    SystemStatusCallback m_systemStatusCallback;
-    RosterCallback m_rosterCallback;
-    TrackPowerCallback m_trackPowerCallback;
-    CommandRefusedCallback m_commandRefusedCallback;
+    // Set on the main or LVGL task, invoked on the WebSocket and supervisor
+    // tasks. Each copies under its own lock and calls the copy (F-30).
+    CallbackSlot<void(ConnectionState)> m_connectionCallback;
+    CallbackSlot<void(const LocoState&)> m_locoStateCallback;
+    CallbackSlot<void(SystemStatus, const std::string&)> m_systemStatusCallback;
+    CallbackSlot<void(const std::vector<RosterEntry>&)> m_rosterCallback;
+    CallbackSlot<void(TrackPower)> m_trackPowerCallback;
+    CallbackSlot<void(const std::string&)> m_commandRefusedCallback;
 
     mutable SemaphoreHandle_t m_stateMutex;
 };

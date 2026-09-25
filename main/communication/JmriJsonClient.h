@@ -4,12 +4,14 @@
 #include <string>
 #include <map>
 #include <functional>
+#include <utility>
 #include "esp_err.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include "CallbackSlot.h"
 
 /**
  * @brief JMRI JSON Protocol Client
@@ -94,12 +96,12 @@ public:
      * @brief Set the configured power manager name to control
      * @param powerName Name of the power manager (e.g., "DCC++", "main")
      */
-    void setConfiguredPowerName(const std::string& powerName) { m_configuredPowerName = powerName; }
+    void setConfiguredPowerName(const std::string& powerName);
     
     /**
      * @brief Get the configured power manager name
      */
-    std::string getConfiguredPowerName() const { return m_configuredPowerName; }
+    std::string getConfiguredPowerName() const;
     
     /**
      * @brief Set power state for the configured power district
@@ -115,21 +117,15 @@ public:
     PowerState getPower() const;
     
     /**
-     * @brief Request list of available power districts
-     * @return ESP_OK on success
-     */
-    esp_err_t requestPowerList();
-    
-    /**
      * @brief Set power state change callback
      * Only called for the configured power manager
      */
-    void setPowerStateCallback(PowerStateCallback callback) { m_powerCallback = callback; }
+    void setPowerStateCallback(PowerStateCallback callback) { m_powerCallback.set(std::move(callback)); }
     
     /**
      * @brief Set connection state change callback
      */
-    void setConnectionStateCallback(ConnectionStateCallback callback) { m_connectionCallback = callback; }
+    void setConnectionStateCallback(ConnectionStateCallback callback) { m_connectionCallback.set(std::move(callback)); }
     
     /**
      * @brief Send heartbeat (keep-alive)
@@ -181,12 +177,15 @@ private:
     std::atomic<bool> m_heartbeatRunning;
     
     // Configured power manager name to control and monitor
+    /** Set on the LVGL and jmri_conn tasks, read on the WebSocket task:
+     * guarded by m_powerMutex (F-42). */
     std::string m_configuredPowerName;
     
     // Power states for known districts
     std::map<std::string, PowerState> m_powerStates;
     SemaphoreHandle_t m_powerMutex;
     
-    PowerStateCallback m_powerCallback;
-    ConnectionStateCallback m_connectionCallback;
+    // Set on the LVGL or main task, invoked on the WebSocket task (F-30).
+    CallbackSlot<void(const std::string&, PowerState)> m_powerCallback;
+    CallbackSlot<void(ConnectionState)> m_connectionCallback;
 };
