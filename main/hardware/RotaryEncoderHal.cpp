@@ -1,5 +1,6 @@
 #include "RotaryEncoderHal.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "waveshare_rgb_lcd_port.h"
 
 static const char* TAG = "RotaryEncoderHal";
@@ -8,6 +9,9 @@ namespace {
     constexpr int ENCODER_I2C_TIMEOUT_MS = 20;
     constexpr int ENCODER_POLL_MS = 100;
     constexpr int ENCODER_READ_RETRY_DELAY_MS = 5;
+    /** Between a register request and the read of its answer. Adafruit's own
+     * Seesaw library waits 250 us; this leaves some margin. */
+    constexpr uint32_t SEESAW_RESPONSE_DELAY_US = 500;
     constexpr uint8_t SEESAW_GPIO_BASE = 0x01;
     constexpr uint8_t SEESAW_GPIO_DIRCLR_BULK = 0x03;
     constexpr uint8_t SEESAW_GPIO_BULK = 0x04;
@@ -107,7 +111,14 @@ void RotaryEncoderHal::pollOnce()
         int32_t deltaRaw = 0;
         bool deltaOk = readEncoderDelta(m_status[i].address, deltaRaw);
 
-        if (deltaOk) {
+        if (deltaOk && !isPlausibleDelta(deltaRaw)) {
+            // A corrupted word, not a rotation -- most likely a response to a
+            // different request after a failed transaction. Dropped as a
+            // failed read (F-19).
+            ESP_LOGW(TAG, "Encoder %d: discarding implausible delta %ld (0x%08lX)", i,
+                     static_cast<long>(deltaRaw),
+                     static_cast<unsigned long>(static_cast<uint32_t>(deltaRaw)));
+        } else if (deltaOk) {
             if (deltaRaw != 0 && m_rotationCallback) {
                 ESP_LOGD(TAG, "Encoder %d delta=%ld", i, static_cast<long>(deltaRaw));
                 m_rotationCallback(i, static_cast<int>(deltaRaw));
@@ -140,9 +151,20 @@ bool RotaryEncoderHal::probeAddress(uint8_t address)
 
 bool RotaryEncoderHal::readBytes(uint8_t address, uint8_t base, uint8_t reg, uint8_t* data, size_t length)
 {
-    uint8_t cmd[2] = {base, reg};
-    esp_err_t err = i2c_master_write_read_device(m_port, address, cmd, sizeof(cmd), data, length,
-                                                 pdMS_TO_TICKS(ENCODER_I2C_TIMEOUT_MS));
+    // Request, wait, then read, as two transactions: the sequence the Seesaw
+    // expects, and the one Adafruit's library uses. A combined write-read gave
+    // it no time to prepare the answer, which the old code covered by reading
+    // everything twice. The delta register clears on every read, so rotation
+    // between those two reads was lost (F-41).
+    const uint8_t cmd[2] = {base, reg};
+    esp_err_t err = i2c_master_write_to_device(m_port, address, cmd, sizeof(cmd),
+                                               pdMS_TO_TICKS(ENCODER_I2C_TIMEOUT_MS));
+    if (err != ESP_OK) {
+        return false;
+    }
+    esp_rom_delay_us(SEESAW_RESPONSE_DELAY_US);
+    err = i2c_master_read_from_device(m_port, address, data, length,
+                                      pdMS_TO_TICKS(ENCODER_I2C_TIMEOUT_MS));
     return err == ESP_OK;
 }
 
@@ -161,11 +183,7 @@ bool RotaryEncoderHal::writeBytes(uint8_t address, uint8_t base, uint8_t reg, co
 bool RotaryEncoderHal::readEncoderDelta(uint8_t address, int32_t& outDelta)
 {
     uint8_t data[4] = {0};
-    // Read twice to mirror observed hardware behaviour (second read yields current delta)
-    if (!readBytes(address, SEESAW_ENCODER_BASE, SEESAW_ENCODER_DELTA, data, sizeof(data))) {
-        return false;
-    }
-    vTaskDelay(pdMS_TO_TICKS(ENCODER_READ_RETRY_DELAY_MS));
+    // Once: readBytes now waits for the answer (F-41).
     if (!readBytes(address, SEESAW_ENCODER_BASE, SEESAW_ENCODER_DELTA, data, sizeof(data))) {
         return false;
     }
@@ -180,10 +198,6 @@ bool RotaryEncoderHal::readEncoderDelta(uint8_t address, int32_t& outDelta)
 bool RotaryEncoderHal::readButtonPressed(uint8_t address, bool& outPressed)
 {
     uint8_t data[4] = {0};
-    if (!readBytes(address, SEESAW_GPIO_BASE, SEESAW_GPIO_BULK, data, sizeof(data))) {
-        return false;
-    }
-    vTaskDelay(pdMS_TO_TICKS(ENCODER_READ_RETRY_DELAY_MS));
     if (!readBytes(address, SEESAW_GPIO_BASE, SEESAW_GPIO_BULK, data, sizeof(data))) {
         return false;
     }

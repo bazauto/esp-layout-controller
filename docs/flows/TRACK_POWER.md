@@ -16,7 +16,7 @@ sequenceDiagram
     participant JMRI as JMRI Server
 
     User->>PSB: Press power button
-    PSB->>PSB: Toggle desired state
+    PSB->>PSB: OFF → ON; ON or UNKNOWN → OFF
     PSB->>JC: setPower(true)
 
     JC->>JMRI: Power command
@@ -37,9 +37,23 @@ sequenceDiagram
 | `4` | OFF | Red/grey button |
 | `0` | UNKNOWN | Amber/warning |
 
+## What a press does
+
+Only a known OFF turns power on. ON **and UNKNOWN** turn it off: the press may be a panic, and
+energising rails nobody has reported on is the wrong way to fail (F-27). A second press, once
+the state is known, turns it on.
+
 ## Connection Dependency
 
-Track power control requires the JMRI JSON WebSocket connection to be active. The `PowerStatusBar` displays the connection status alongside the power button. If the WebSocket is disconnected, the power button is non-functional.
+Under WiThrottle, power normally goes over the JMRI JSON WebSocket, to the configured power
+manager. When that link is down:
+
+- **OFF** still goes out, over WiThrottle's own `PPA0`, which switches off all power rather
+  than the named district. That is the safe direction to widen (F-27).
+- **ON** waits for the JSON link, so it keeps meaning the configured district only.
+- The button shows WiThrottle's last `PPA` state when the JSON link has none.
+
+For a stop that does not depend on power at all, use **E-STOP** on the main screen.
 
 ## Configured Power Manager
 

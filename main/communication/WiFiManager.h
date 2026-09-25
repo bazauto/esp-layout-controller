@@ -1,9 +1,12 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <functional>
+#include "CallbackSlot.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_timer.h"
 
 /**
  * @brief Manages WiFi connection with configuration support.
@@ -11,7 +14,8 @@
  * Features:
  * - Connect to WiFi with stored credentials
  * - Configuration via UI
- * - Automatic reconnection
+ * - Automatic reconnection: a few immediate retries, then a capped backoff
+ *   that keeps going until the operator disconnects or forgets the network
  * - Connection status callbacks
  * - NVS storage for credentials
  */
@@ -54,7 +58,11 @@ public:
     esp_err_t connect();
 
     /**
-     * @brief Connect with specific credentials (and save to NVS)
+     * @brief Connect with specific credentials.
+     *
+     * Saved to NVS once they have produced an IP address, not before: saving
+     * up front let a mistyped password replace a good one (F-40).
+     *
      * @param ssid WiFi SSID
      * @param password WiFi password
      * @return ESP_OK if connection started successfully
@@ -131,10 +139,31 @@ private:
     static constexpr const char* NVS_PASSWORD_KEY = "password";
     static constexpr int MAX_RETRY_ATTEMPTS = 5;
 
+    // After the immediate retries: 5 s, doubling, capped at a minute (F-24).
+    static constexpr uint32_t SLOW_RETRY_BASE_MS = 5000;
+    static constexpr uint32_t SLOW_RETRY_MAX_MS = 60000;
+
     State m_state;
-    StateCallback m_stateCallback;
-    int m_retryCount;
+    /** Set on the LVGL or main task, invoked on the event loop task (F-30). */
+    CallbackSlot<void(State, const std::string&)> m_stateCallback;
+    std::atomic<int> m_retryCount;
+    int m_slowRetryCount;
     bool m_initialized;
+
+    /** True from connect() until disconnect() or forgetNetwork(). */
+    std::atomic<bool> m_wantConnected;
+
+    /** Set by connect(ssid, password); cleared once those credentials are saved. */
+    std::atomic<bool> m_saveOnSuccess;
+
+    /** One-shot timer for the slow retries. Its callback only calls
+     * esp_wifi_connect(), which does not block the esp_timer task (F-09). */
+    esp_timer_handle_t m_retryTimer;
+
+    esp_err_t connectTo(const std::string& ssid, const std::string& password, bool saveOnSuccess);
+    void scheduleSlowRetry();
+    void cancelSlowRetry();
+    static void retryTimerCallback(void* arg);
 
     // Event handlers
     static void eventHandler(void* arg, esp_event_base_t event_base,

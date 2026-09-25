@@ -26,8 +26,9 @@ main/
   ├── hardware/       # HAL (encoders, I2C)
   ├── communication/  # ThrottleBackend port + transports (WiThrottle; orchestrator WebSocket)
   ├── model/          # Data (Loco, Throttle, Knob)
-  ├── controller/     # Business logic
-  └── ui/             # LVGL screens; colours from UiTheme.h, never raw hex
+  ├── controller/     # Business logic; SettingsWriter takes the UI's NVS writes
+  ├── ui/             # LVGL screens; colours from UiTheme.h, never raw hex
+  └── utils/          # CallbackSlot for any callback set on one task and called on another
 ```
 
 ### Class Structure
@@ -74,11 +75,15 @@ class MainScreen {
     ThrottleController* m_throttleController;  // Not owned!
 };
 
-// UI can be deleted/recreated without state loss
-delete g_mainScreen;
-g_mainScreen = new MainScreen();
-g_mainScreen->create(..., g_throttleController);
+// Config screens can be deleted/recreated without state loss
+m_settingsScreen = std::make_unique<SettingsScreen>(...);
+m_settingsScreen->create();
 ```
+
+**Exception: `MainScreen` is built once and never destroyed** (F-21) — re-show it with
+`show()`. Destroying it from a Back handler freed it under a task already waiting on the LVGL
+lock to repaint it. And no UI class registers on a client's connection callback: those single
+slots belong to the active backend, so screens poll on an LVGL timer.
 
 ### ⚠️ CRITICAL: LVGL Thread Safety
 **LVGL is NOT thread-safe!** Lock before UI access from network tasks:

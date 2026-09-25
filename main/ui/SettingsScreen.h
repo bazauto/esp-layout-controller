@@ -10,6 +10,7 @@ class WiFiController;
 class RotaryEncoderHal;
 class JmriJsonClient;
 class WiThrottleClient;
+class SettingsWriter;
 
 /**
  * @brief Device settings, and the front door to each transport's own config.
@@ -34,7 +35,8 @@ public:
                    WiFiController* wifiController,
                    RotaryEncoderHal* encoderHal,
                    JmriJsonClient* jsonClient,
-                   WiThrottleClient* wiThrottleClient);
+                   WiThrottleClient* wiThrottleClient,
+                   SettingsWriter* settingsWriter);
     ~SettingsScreen();
 
     SettingsScreen(const SettingsScreen&) = delete;
@@ -93,6 +95,8 @@ private:
     RotaryEncoderHal* m_encoderHal;
     JmriJsonClient* m_jsonClient;
     WiThrottleClient* m_wiThrottleClient;
+    /** NVS writes go here, never onto the LVGL task (F-39). */
+    SettingsWriter* m_settingsWriter;
 
     /** Captured at create() so the rows built match the rows updated. */
     ThrottleTransport m_shownTransport;

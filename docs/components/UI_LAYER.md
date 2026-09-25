@@ -58,15 +58,17 @@ the bottom. Every screen follows it.
 ```
 
 **Dependencies (raw pointers, not owned):**
-- `WiThrottleClient*`
-- `JmriJsonClient*`
-- `ThrottleController*`
+- `ThrottleController*` — and nothing else. Connection state, knob gating, functions and
+  power all come through it, never from a concrete client.
+
+**Lifetime:** built once per boot and re-shown with `show()`; never destroyed (F-21).
 
 **Key Methods:**
 
 | Method | Description |
 |--------|-------------|
-| `create(WT*, JC*, TC*)` | Build LVGL widget tree, register callbacks |
+| `create(TC*)` | Build LVGL widget tree, register the UI update callback. First show only |
+| `show()` | Re-load the existing screen and repaint it |
 | `updateThrottle(id)` | Refresh one throttle meter from snapshot |
 | `updateAllThrottles()` | Refresh all meters + roster carousel |
 
@@ -79,7 +81,8 @@ the bottom. Every screen follows it.
 | `onReleaseButtonClicked` | "Release" button | `TC::onThrottleRelease()` |
 | `onVirtualEncoderRotation` | Virtual encoder ±buttons | `TC::onKnobRotation()` |
 | `onVirtualEncoderPress` | Virtual encoder press | `TC::onKnobPress()` |
-| `onFunctionButtonClicked` | Function toggle | `TC::setFunction()` — through the port, not a client |
+| `onFunctionButtonClicked` | Function button press / release | `TC::onFunctionButton()` — reports the button; the controller decides press/release or toggle for the transport (F-28) |
+| `onEmergencyStopPressed` | **E-STOP** (bottom row, on press) | `TC::emergencyStop()` (F-27) |
 | `onSettingsButtonClicked` | Settings gear icon | Navigate to WiFiConfigScreen |
 | `onJmriButtonClicked` | Settings icon | Navigate to SettingsScreen |
 
@@ -100,7 +103,8 @@ the bottom. Every screen follows it.
 - SSID/password input with LVGL keyboard
 - Connect / disconnect / forget network
 - Status display (IP address, connection state)
-- Credentials saved to NVS via `WiFiManager`
+- Credentials saved to NVS by `WiFiManager` once they have produced an IP address; Forget
+  goes through the `SettingsWriter`, off the LVGL task
 
 **Navigation:** Back button → `close_wifi_config_screen()` → `show_main_screen()`
 
@@ -122,7 +126,10 @@ screen titled "JMRI Server Configuration" had no business owning any of them.
 **JMRI connections panel:** WiThrottle and JMRI JSON status. Device-wide status (software,
 hardware, WiFi, encoders) is on the settings screen, not duplicated here.
 
-**Connect flow:** Connects WiThrottle first; when the server sends back the `PW` (web port) message, auto-connects the JSON client using the discovered port.
+**Connect flow:** Connect and Disconnect are requests to `JmriConnectionController`, carried
+out on its `jmri_conn` task: saving, connecting and the wait for the receive task to exit all
+happen there, never on the LVGL task (F-34). Disconnect sticks until the next Connect. The
+JSON client's port comes from WiThrottle's `PW` message. Status is polled on an LVGL timer.
 
 **Navigation:** Back button → `show_settings_screen()`
 
@@ -165,9 +172,11 @@ transports are peers, and this one needs four fields including a credential.
 The password field is masked on screen. It is still plaintext in NVS — the accepted F-18
 risk.
 
-**Connect flow:** Save & Connect writes NVS, then does the login and roster fetch **on its
-own task** (`orch_ui_conn`). The login is a blocking HTTP round trip; running it on the LVGL
-task would freeze every throttle at once (F-05).
+**Connect flow:** Save & Connect queues the save on the `SettingsWriter`, then queues the
+wake-up of the `orch_connect` supervisor behind it (F-39). The supervisor logs in with the
+saved settings and fetches the roster. The login is a blocking HTTP round
+trip; running it on the LVGL task would freeze every throttle at once (F-05). The screen
+used to run its own connect task, which raced the supervisor for the same client.
 
 **Navigation:** Back button → `show_settings_screen()`
 
@@ -187,7 +196,8 @@ did nothing and the label read "Disconnected" while the layout was in fact conne
 
 - A transport answering `supportsTrackPower() == false` gets the button **hidden**, not left
   dead for the operator to press and wonder about.
-- `TrackPower::UNKNOWN` renders as its own state ("Power ?"), not as off.
+- `TrackPower::UNKNOWN` renders as its own state ("Power ?"), not as off — and a press on it
+  turns power **off**, not on. Only a known OFF turns it on (F-27).
 - The press returns immediately: the orchestrator's power command is a blocking HTTP round
   trip, so the write happens on a short-lived task (F-05). The button repaints when the
   layout says power changed, not when we asked.

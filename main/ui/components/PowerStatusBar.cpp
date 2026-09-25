@@ -19,6 +19,8 @@ PowerStatusBar::PowerStatusBar()
     , m_trackPowerButton(nullptr)
     , m_connectionStatusLabel(nullptr)
     , m_throttleController(nullptr)
+    , m_drawnTrackPower(-1)
+    , m_drawnConnected(-1)
 {
 }
 
@@ -103,11 +105,11 @@ void PowerStatusBar::onTrackPowerClicked(lv_event_t* e)
         return;
     }
 
-    // UNKNOWN turns power on: the useful thing to do when nobody has said what
-    // the rails are doing is to energise them, and the operator can press
-    // again to turn it off once the state is known.
+    // Only a known OFF turns power on. UNKNOWN turns it off: the press may be
+    // a panic, and energising rails nobody has reported on is the wrong way to
+    // fail. A second press, once the state is known, turns it on (F-27).
     const ThrottleBackend::TrackPower current = bar->m_throttleController->getTrackPower();
-    const bool newState = (current != ThrottleBackend::TrackPower::ON);
+    const bool newState = (current == ThrottleBackend::TrackPower::OFF);
 
     ESP_LOGI(TAG, "Toggling track power: %s", newState ? "ON" : "OFF");
 
@@ -124,6 +126,11 @@ void PowerStatusBar::updateTrackPowerButton(ThrottleBackend::TrackPower state)
 
     lv_obj_t* label = lv_obj_get_child(m_trackPowerButton, 0);
     if (!label) return;
+
+    if (static_cast<int>(state) == m_drawnTrackPower) {
+        return;
+    }
+    m_drawnTrackPower = static_cast<int>(state);
 
     uint32_t color;
     const char* stateText;
@@ -152,6 +159,11 @@ void PowerStatusBar::updateTrackPowerButton(ThrottleBackend::TrackPower state)
 void PowerStatusBar::updateConnectionStatus(bool connected)
 {
     if (!m_connectionStatusLabel) return;
+
+    if (static_cast<int>(connected) == m_drawnConnected) {
+        return;
+    }
+    m_drawnConnected = static_cast<int>(connected);
 
     const char* icon = connected ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE;
     const char* text = connected ? " Connected" : " Disconnected";

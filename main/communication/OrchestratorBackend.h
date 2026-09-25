@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "CallbackSlot.h"
 #include "OrchestratorClient.h"
 #include "ThrottleBackend.h"
 #include "freertos/FreeRTOS.h"
@@ -41,6 +42,9 @@ public:
     /** State arrives unprompted as LOCO_STATE, so no polling task is created. */
     bool requiresPolling() const override { return false; }
 
+    /** FUNCTION_COMMAND sets the function's state outright (F-28). */
+    bool functionCommandIsButtonEvent() const override { return false; }
+
     bool isConnected() const override;
     ConnectionState getState() const override;
 
@@ -51,6 +55,9 @@ public:
     esp_err_t setSpeedAndDirection(int throttleId, int speed, bool forward) override;
     esp_err_t setFunction(int throttleId, int function, bool state) override;
     esp_err_t refreshThrottleState(int throttleId) override;
+
+    /** EMERGENCY_STOP: halts the whole layout, not just this device's locos. */
+    esp_err_t emergencyStop() override;
 
     size_t getRosterSize() const override;
     bool getRosterEntry(int index, RosterEntry& outEntry) const override;
@@ -88,15 +95,35 @@ private:
     /** Routes an incoming LocoState to whichever throttles hold that address. */
     void onLocoState(const OrchestratorClient::LocoState& state);
 
+    /**
+     * @brief Puts every throttle back to what the layout last reported.
+     *
+     * Called on an ERROR frame. The orchestrator does not say which command it
+     * refused, and the controller has already shown what was asked for, so the
+     * display is re-seeded from the layout's own state (F-25).
+     */
+    void onCommandRefused();
+
+    /**
+     * @brief Applies a LocoState to one throttle: shadow first, then display.
+     *
+     * Does nothing when the throttle no longer holds that address, so a state
+     * racing a release or a re-acquire cannot land on the wrong loco.
+     */
+    void publishToThrottle(int throttleId,
+                           const OrchestratorClient::LocoState& state,
+                           const ThrottleStateCallback& callback);
+
     bool lock(TickType_t timeout) const;
     void unlock() const;
 
     OrchestratorClient* m_client;
     std::array<Assignment, MAX_THROTTLES> m_assignments;
 
-    ThrottleStateCallback m_throttleStateCallback;
-    ConnectionStateCallback m_connectionStateCallback;
-    TrackPowerCallback m_trackPowerCallback;
+    // Set on the main task, invoked on the client's tasks (F-30).
+    CallbackSlot<void(const ThrottleUpdate&)> m_throttleStateCallback;
+    CallbackSlot<void(ConnectionState)> m_connectionStateCallback;
+    CallbackSlot<void(TrackPower)> m_trackPowerCallback;
 
     mutable SemaphoreHandle_t m_mutex;
 };

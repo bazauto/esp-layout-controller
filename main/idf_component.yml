@@ -16,4 +16,7 @@ dependencies:
 
   espressif/esp_lcd_touch_gt911: '^1'
 
-  espressif/esp_websocket_client: '*'
+  # Pinned to the 1.8.x series that dependencies.lock holds. '*' let a fresh
+  # resolve take any major version of the library both WebSocket clients sit on
+  # (F-43).
+  espressif/esp_websocket_client: '~1.8.0'

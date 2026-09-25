@@ -32,28 +32,32 @@ sequenceDiagram
 
     Note over TC: State persists across screen changes
 
-    AC->>MS: new + create(WT*, JC*, TC*)
+    AC->>MS: new + create(TC*) — first show_main_screen() only
     Note over MS: Active — showing throttles
 
     User->>MS: Press "Settings"
     MS->>AC: show_wifi_config_screen()
-    AC->>MS: delete MainScreen
-    AC->>WCS: new WiFiConfigScreen(WiFiManager&)
     AC->>WCS: create()
+    Note over MS: Kept, hidden — still repainted by TC
     Note over WCS: Active — showing WiFi config
 
     User->>WCS: Press "Back"
     WCS->>AC: close_wifi_config_screen() → show_main_screen()
-    AC->>WCS: delete WiFiConfigScreen
-    AC->>MS: new MainScreen()
-    AC->>MS: create(WT*, JC*, TC*)
-    Note over MS: Rebuilt from scratch — state intact from TC
+    AC->>MS: show()
+    Note over MS: Same instance re-shown and repainted
+    WCS->>WCS: lv_obj_del_async(its own LVGL screen)
 ```
 
 ## Key Points
 
-- **MainScreen is recreated** each time `showMainScreen()` is called. This is safe because all state lives in `ThrottleController`.
-- **Config screens are heap-allocated** and deleted when navigating away.
+- **MainScreen is built once and re-shown**, never destroyed. Destroying it from a Back
+  handler was a use-after-free: an encoder or network task that had already read the UI
+  callback could be waiting on the LVGL lock to repaint it (F-21). And `lv_scr_load` frees
+  nothing, so rebuilding it also leaked the whole tree on every return (F-32).
+- **Config screens delete their own LVGL tree** (`lv_obj_del_async`) when left. Their C++
+  objects are kept by `AppController`, except the settings screen, which is rebuilt on each
+  open. None of them registers on a client's connection callback: they poll on an LVGL
+  timer, because that slot belongs to the active backend.
 - **Wrapper functions** (`show_main_screen()`, `show_wifi_config_screen()`, etc.) provide `extern "C"` linkage so `main.c` and inter-screen navigation work without C++ name mangling.
 - **LVGL lock** must be held when creating/destroying screens (handled by the callers).
 

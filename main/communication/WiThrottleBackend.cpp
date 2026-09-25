@@ -42,6 +42,15 @@ esp_err_t WiThrottleBackend::setTrackPower(bool on)
     if (!m_jsonClient) {
         return ESP_ERR_NOT_SUPPORTED;
     }
+
+    // An OFF must not depend on the JSON link. When that link is down it goes
+    // over WiThrottle's own PPA0 instead -- all power rather than the named
+    // district, which is the safe direction to widen. ON still waits for the
+    // JSON link, so it keeps meaning the configured district only (F-27).
+    if (!on && !m_jsonClient->isConnected() && m_client && m_client->isConnected()) {
+        ESP_LOGW(TAG, "JMRI JSON link down; sending track power OFF over WiThrottle (PPA0)");
+        return m_client->setTrackPower("main", false);
+    }
     return m_jsonClient->setPower(on);
 }
 
@@ -54,28 +63,37 @@ ThrottleBackend::TrackPower WiThrottleBackend::getTrackPower() const
     switch (m_jsonClient->getPower()) {
         case JmriJsonClient::PowerState::ON:  return TrackPower::ON;
         case JmriJsonClient::PowerState::OFF: return TrackPower::OFF;
-        default:                              return TrackPower::UNKNOWN;
+        default:                              break;
     }
+
+    // Nothing from the JSON link: fall back to what WiThrottle's PPA lines
+    // last said, rather than showing unknown while JMRI has told us.
+    if (m_client) {
+        switch (m_client->getTrackPower("main")) {
+            case WiThrottleClient::PowerState::ON:  return TrackPower::ON;
+            case WiThrottleClient::PowerState::OFF: return TrackPower::OFF;
+            default:                                break;
+        }
+    }
+    return TrackPower::UNKNOWN;
 }
 
 void WiThrottleBackend::setTrackPowerCallback(TrackPowerCallback callback)
 {
-    m_trackPowerCallback = std::move(callback);
+    const bool clearing = !callback;
+    m_trackPowerCallback.set(std::move(callback));
 
     if (!m_jsonClient) {
         return;
     }
 
-    if (!m_trackPowerCallback) {
+    if (clearing) {
         m_jsonClient->setPowerStateCallback(nullptr);
         return;
     }
 
     m_jsonClient->setPowerStateCallback(
         [this](const std::string& /*powerName*/, JmriJsonClient::PowerState state) {
-            if (!m_trackPowerCallback) {
-                return;
-            }
             switch (state) {
                 case JmriJsonClient::PowerState::ON:
                     m_trackPowerCallback(TrackPower::ON);
@@ -158,6 +176,14 @@ esp_err_t WiThrottleBackend::refreshThrottleState(int throttleId)
     return (speedErr != ESP_OK) ? speedErr : dirErr;
 }
 
+esp_err_t WiThrottleBackend::emergencyStop()
+{
+    if (!m_client) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return m_client->emergencyStopAll();
+}
+
 size_t WiThrottleBackend::getRosterSize() const
 {
     return m_client ? m_client->getRosterSize() : 0;
@@ -182,23 +208,20 @@ bool WiThrottleBackend::getRosterEntry(int index, RosterEntry& outEntry) const
 
 void WiThrottleBackend::setThrottleStateCallback(ThrottleStateCallback callback)
 {
-    m_throttleStateCallback = std::move(callback);
+    const bool clearing = !callback;
+    m_throttleStateCallback.set(std::move(callback));
 
     if (!m_client) {
         return;
     }
 
-    if (!m_throttleStateCallback) {
+    if (clearing) {
         m_client->setThrottleStateCallback(nullptr);
         return;
     }
 
     m_client->setThrottleStateCallback(
         [this](const WiThrottleClient::ThrottleUpdate& update) {
-            if (!m_throttleStateCallback) {
-                return;
-            }
-
             ThrottleUpdate ported;
             ported.throttleId = update.throttleId - '0';
             ported.address = update.address;
@@ -222,44 +245,40 @@ void WiThrottleBackend::setThrottleStateCallback(ThrottleStateCallback callback)
 
 void WiThrottleBackend::setConnectionStateCallback(ConnectionStateCallback callback)
 {
-    m_connectionStateCallback = std::move(callback);
+    const bool clearing = !callback;
+    m_connectionStateCallback.set(std::move(callback));
 
     if (!m_client) {
         return;
     }
 
-    if (!m_connectionStateCallback) {
+    if (clearing) {
         m_client->setConnectionStateCallback(nullptr);
         return;
     }
 
     m_client->setConnectionStateCallback(
         [this](WiThrottleClient::ConnectionState state) {
-            if (m_connectionStateCallback) {
-                m_connectionStateCallback(toPortState(state));
-            }
+            m_connectionStateCallback(toPortState(state));
         });
 }
 
 void WiThrottleBackend::setFunctionLabelsCallback(FunctionLabelsCallback callback)
 {
-    m_functionLabelsCallback = std::move(callback);
+    const bool clearing = !callback;
+    m_functionLabelsCallback.set(std::move(callback));
 
     if (!m_client) {
         return;
     }
 
-    if (!m_functionLabelsCallback) {
+    if (clearing) {
         m_client->setFunctionLabelsCallback(nullptr);
         return;
     }
 
     m_client->setFunctionLabelsCallback(
         [this](char throttleIdChar, const std::vector<std::string>& labels) {
-            if (!m_functionLabelsCallback) {
-                return;
-            }
-
             const int throttleId = throttleIdChar - '0';
             if (!isValidThrottle(throttleId)) {
                 ESP_LOGW(TAG, "Dropping function labels for out-of-range throttle id '%c'",

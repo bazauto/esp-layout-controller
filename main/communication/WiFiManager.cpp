@@ -4,17 +4,26 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include <cstring>
+#include <utility>
 
 WiFiManager::WiFiManager()
     : m_state(State::DISCONNECTED)
-    , m_stateCallback(nullptr)
     , m_retryCount(0)
+    , m_slowRetryCount(0)
     , m_initialized(false)
+    , m_wantConnected(false)
+    , m_saveOnSuccess(false)
+    , m_retryTimer(nullptr)
 {
 }
 
 WiFiManager::~WiFiManager()
 {
+    if (m_retryTimer) {
+        esp_timer_stop(m_retryTimer);
+        esp_timer_delete(m_retryTimer);
+        m_retryTimer = nullptr;
+    }
     if (m_initialized) {
         esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &WiFiManager::eventHandler);
         esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &WiFiManager::eventHandler);
@@ -57,6 +66,19 @@ esp_err_t WiFiManager::initialize()
     // Start WiFi (required for scanning even without connection)
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    const esp_timer_create_args_t retryTimerArgs = {
+        .callback = &WiFiManager::retryTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "wifi_retry",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&retryTimerArgs, &m_retryTimer) != ESP_OK) {
+        // Not fatal: the immediate retries still work, only the slow ones do not.
+        ESP_LOGE(TAG, "Failed to create WiFi retry timer; no reconnection after the first retries");
+        m_retryTimer = nullptr;
+    }
+
     m_initialized = true;
     ESP_LOGI(TAG, "WiFi Manager initialized");
 
@@ -73,36 +95,55 @@ esp_err_t WiFiManager::connect()
         return ESP_ERR_NOT_FOUND;
     }
 
-    return connect(ssid, password);
+    // Already saved; nothing to write when they work.
+    return connectTo(ssid, password, false);
 }
 
 esp_err_t WiFiManager::connect(const std::string& ssid, const std::string& password)
+{
+    return connectTo(ssid, password, true);
+}
+
+esp_err_t WiFiManager::connectTo(const std::string& ssid, const std::string& password,
+                                 bool saveOnSuccess)
 {
     if (!m_initialized) {
         ESP_LOGE(TAG, "WiFi Manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Save credentials for auto-reconnect
-    saveCredentials(ssid, password);
+    // A slow retry of the previous network must not land on top of this one.
+    cancelSlowRetry();
 
     wifi_config_t wifi_config = {};
     strncpy((char*)wifi_config.sta.ssid, ssid.c_str(), sizeof(wifi_config.sta.ssid) - 1);
     strncpy((char*)wifi_config.sta.password, password.c_str(), sizeof(wifi_config.sta.password) - 1);
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    // Refused while the station is mid-connect -- for instance a slow retry in
+    // flight. That is a reason to report failure and let the operator press
+    // again, not to reboot the device with trains running (F-40).
+    esp_err_t ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(ret));
+        setState(State::FAILED);
+        return ret;
+    }
     // WiFi is already started in initialize(), just connect
 
-    setState(State::CONNECTING);
+    m_saveOnSuccess = saveOnSuccess;
+    m_wantConnected = true;
     m_retryCount = 0;
+    m_slowRetryCount = 0;
+    setState(State::CONNECTING);
 
     ESP_LOGI(TAG, "Connecting to SSID: %s", ssid.c_str());
 
-    esp_err_t ret = esp_wifi_connect();
+    ret = esp_wifi_connect();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_connect failed: %d", ret);
         setState(State::FAILED);
+        scheduleSlowRetry();
     }
 
     return ret;
@@ -110,6 +151,11 @@ esp_err_t WiFiManager::connect(const std::string& ssid, const std::string& passw
 
 void WiFiManager::disconnect()
 {
+    // The operator's choice: stop retrying, and do not retry on the
+    // disconnect event this is about to cause.
+    m_wantConnected = false;
+    cancelSlowRetry();
+
     if (m_state != State::DISCONNECTED) {
         esp_wifi_disconnect();
         setState(State::DISCONNECTED);
@@ -117,10 +163,51 @@ void WiFiManager::disconnect()
     }
 }
 
+void WiFiManager::scheduleSlowRetry()
+{
+    if (!m_retryTimer || !m_wantConnected) {
+        return;
+    }
+
+    const int shift = m_slowRetryCount < 4 ? m_slowRetryCount : 4;
+    uint32_t delayMs = SLOW_RETRY_BASE_MS << shift;
+    if (delayMs > SLOW_RETRY_MAX_MS) {
+        delayMs = SLOW_RETRY_MAX_MS;
+    }
+    m_slowRetryCount++;
+
+    esp_timer_stop(m_retryTimer);  // Not running is fine.
+    if (esp_timer_start_once(m_retryTimer, static_cast<uint64_t>(delayMs) * 1000) == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi retry %d in %lu s", m_slowRetryCount,
+                 static_cast<unsigned long>(delayMs / 1000));
+    }
+}
+
+void WiFiManager::cancelSlowRetry()
+{
+    if (m_retryTimer) {
+        esp_timer_stop(m_retryTimer);
+    }
+}
+
+void WiFiManager::retryTimerCallback(void* arg)
+{
+    auto* manager = static_cast<WiFiManager*>(arg);
+    // Deliberately nothing but esp_wifi_connect(), which returns at once: this
+    // runs on the shared esp_timer task (F-09). The outcome arrives as an
+    // event, which schedules the next retry or reports the connection.
+    // The state check covers a retry that fired just as a connection landed:
+    // connecting again on top of a live one would only drop it.
+    if (manager && manager->m_wantConnected && manager->m_state != State::CONNECTED) {
+        esp_wifi_connect();
+    }
+}
+
 void WiFiManager::forgetNetwork()
 {
     // Disconnect first
     disconnect();
+    m_saveOnSuccess = false;
     
     // Clear stored credentials
     nvs_handle_t handle;
@@ -188,7 +275,7 @@ void WiFiManager::clearStoredCredentials()
 
 void WiFiManager::setStateCallback(StateCallback callback)
 {
-    m_stateCallback = callback;
+    m_stateCallback.set(std::move(callback));
 }
 
 esp_err_t WiFiManager::startScan()
@@ -252,22 +339,52 @@ void WiFiManager::handleWiFiEvent(esp_event_base_t event_base, int32_t event_id,
         if (event_id == WIFI_EVENT_STA_START) {
             ESP_LOGI(TAG, "WiFi started");
         } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-            if (m_state == State::CONNECTING || m_state == State::CONNECTED) {
-                if (m_retryCount < MAX_RETRY_ATTEMPTS) {
-                    esp_wifi_connect();
-                    m_retryCount++;
-                    ESP_LOGI(TAG, "Retry connecting to WiFi (%d/%d)", m_retryCount, MAX_RETRY_ATTEMPTS);
-                    setState(State::CONNECTING);
-                } else {
-                    ESP_LOGE(TAG, "Failed to connect to WiFi after %d attempts", MAX_RETRY_ATTEMPTS);
-                    setState(State::FAILED);
+            // Retry for as long as the operator wants this network. Giving up
+            // for good after five quick attempts meant a router reboot left the
+            // device offline -- and every throttle dead -- until someone went
+            // into settings (F-24).
+            if (!m_wantConnected) {
+                return;
+            }
+            if (m_retryCount < MAX_RETRY_ATTEMPTS) {
+                esp_wifi_connect();
+                m_retryCount++;
+                ESP_LOGI(TAG, "Retry connecting to WiFi (%d/%d)", m_retryCount.load(), MAX_RETRY_ATTEMPTS);
+                setState(State::CONNECTING);
+            } else {
+                // Reported as failed, so the settings screen offers Connect,
+                // but still retried in the background.
+                if (m_state != State::FAILED) {
+                    ESP_LOGE(TAG, "Failed to connect to WiFi after %d attempts; retrying with backoff",
+                             MAX_RETRY_ATTEMPTS);
                 }
+                setState(State::FAILED);
+                scheduleSlowRetry();
             }
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
         ESP_LOGI(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
         m_retryCount = 0;
+        m_slowRetryCount = 0;
+        cancelSlowRetry();
+
+        // Only now are the credentials known to work, so only now do they
+        // replace the saved ones. Read back from the driver, which holds what
+        // just connected, rather than from anything the UI task might change.
+        if (m_saveOnSuccess.exchange(false)) {
+            wifi_config_t cfg = {};
+            if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK) {
+                const std::string ssid(reinterpret_cast<const char*>(cfg.sta.ssid),
+                                       strnlen(reinterpret_cast<const char*>(cfg.sta.ssid),
+                                               sizeof(cfg.sta.ssid)));
+                const std::string password(reinterpret_cast<const char*>(cfg.sta.password),
+                                           strnlen(reinterpret_cast<const char*>(cfg.sta.password),
+                                                   sizeof(cfg.sta.password)));
+                saveCredentials(ssid, password);
+            }
+        }
+
         setState(State::CONNECTED);
     }
 }
@@ -332,9 +449,10 @@ void WiFiManager::setState(State newState)
     if (m_state != newState) {
         m_state = newState;
         
-        if (m_stateCallback) {
+        StateCallback callback = m_stateCallback.get();
+        if (callback) {
             std::string ip = (newState == State::CONNECTED) ? getIpAddress() : "";
-            m_stateCallback(newState, ip);
+            callback(newState, ip);
         }
     }
 }

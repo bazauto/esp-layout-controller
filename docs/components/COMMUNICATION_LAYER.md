@@ -26,7 +26,25 @@ and that difference surfaces here rather than as a fake session.
 | `providesRoster()` | No selectable roster — the controller must not offer loco selection |
 | `providesFunctionLabels()` | UI falls back to `F0`…`F28` |
 | `requiresPolling()` | State arrives unprompted; no `throttle_poll` task is created |
+| `functionCommandIsButtonEvent()` | `setFunction()` sets a state outright (orchestrator), so the controller toggles on press and ignores the release (F-28). True for WiThrottle, where JMRI applies latching to press and release |
 | `supportsTrackPower()` | The power button is **hidden**, not left dead |
+
+### Emergency stop
+
+`emergencyStop()` stops everything the transport can, each in its own terms (F-27): the
+orchestrator's `EMERGENCY_STOP` halts the **whole layout**; WiThrottle has no layout-wide
+command, so it sends `X` to every loco this device holds. The controller shows the throttles
+as stopped only once the stop has actually been sent.
+
+### Refused commands (orchestrator)
+
+The orchestrator answers a refused command — one sent while the system is `offline`, say —
+with an `ERROR` that names no command. By then the controller has already shown what was asked
+for, so `OrchestratorBackend` re-seeds every assigned throttle from the layout's last reported
+state (F-25). The send itself succeeded, so rolling back on a failed send cannot catch this.
+
+`OrchestratorClient::m_client` is guarded by its own mutex, held across each send and across a
+re-login's stop and destroy, so a re-login cannot free the handle under a sender (F-26).
 
 ### Track power lives on this port too
 
@@ -49,6 +67,12 @@ Implementations are called from the LVGL task (through the controller's event ha
 from the polling task, so every method must be safe on more than one task. Callbacks fire on
 whichever task the transport receives on — never assume the LVGL task, and take
 `lvgl_port_lock` before touching a widget from one.
+
+Every callback slot, on the backends and on the clients beneath them, is a `CallbackSlot`
+(`main/utils/CallbackSlot.h`). It is set under its own lock, and the callback is invoked as a
+copy with that lock released (F-30). Clearing a slot does not wait for a call already in
+flight, so whatever a callback reaches must outlive the clear — one reason `MainScreen` is
+never destroyed.
 
 ---
 
@@ -101,7 +125,7 @@ The login is **blocking**, so it never runs on the LVGL task (F-05). See
 
 | Inbound | Effect |
 |---------|--------|
-| `STATE_SNAPSHOT` | Applies every loco's state and the system status. **Display only** — never replayed outward as a command. |
+| `STATE_SNAPSHOT` | Applies every loco's state and the system status, and replaces the per-loco state cache. **Display only** — never replayed outward as a command. |
 | `LOCO_STATE` | One loco's speed, direction and functions. |
 | `SYSTEM_STATUS` | Online / safe-stop / offline, with reason. |
 | `HEARTBEAT` | Liveness timestamp only (`secondsSinceLastMessage()`). |
@@ -133,6 +157,11 @@ Refused, each with a log line and no callback:
 
 Within a `STATE_SNAPSHOT`, one bad loco entry is skipped without costing the rest.
 
+A message split across frames (a text frame without FIN, then continuations) is reassembled
+before it is parsed, up to 24 KB. The receive buffer used to be cleared at every frame's
+start, which parsed each fragment alone and refused them all (F-42). The connection, system
+and track-power states are atomics, so no lock timeout can lose a change.
+
 ### Roster and track power are REST, not WebSocket
 
 The `ClientMessage` union has no track-power member and the snapshot carries loco state keyed
@@ -143,8 +172,26 @@ by address but no names, so both are HTTP:
 | Roster | `GET /api/layouts/{id}/locos` |
 | Track power | `POST /api/layouts/{id}/dcc-link/power` with `{"on": bool}` |
 
-The layout id comes from `GET /api/layouts`, fetched once and cached. The roster is built
-aside and swapped in, so a partly-built roster is never visible to the carousel.
+The layout id comes from `GET /api/layouts`, fetched once per login and cached; a new host
+never inherits the old one's id. The orchestrator runs one layout, and the first is used —
+with a warning if there is ever more than one (F-42).
+
+The roster is **streamed**. `JsonArraySplitter` hands over each loco record as its closing
+brace arrives, and each is parsed with cJSON on its own, so memory is bounded by one record
+rather than by a response buffer. The old 8 KB buffer refused any roster above about 35 locos
+whole (F-35). The limits are 4 KB per record, with room for the function labels the
+orchestrator is gaining, and 128 locos:
+
+| What arrives | What happens |
+|--------------|--------------|
+| A record over 4 KB | That loco is skipped, with a warning |
+| A record with no positive address | That loco is skipped, as before |
+| More than 128 locos | The first 128 are kept, with a warning |
+| A record cJSON cannot parse, or a stream that is not an array of objects | The whole roster is refused |
+| A stream that stops before its closing `]` | The whole roster is refused |
+
+The roster is built aside and swapped in, so a partly-built roster is never visible to the
+carousel.
 
 The power POST's **reply body is deliberately ignored**. The `DCC_LINK` event pushed the
 moment it lands is what tells us the truth — that is the route's own contract, not our
@@ -187,6 +234,13 @@ handshake. The adapter also shadows each throttle's last commanded speed and dir
 because `THROTTLE_COMMAND` carries both together and a caller changing one still has to
 supply the other.
 
+**Acquire starts from what the loco is doing.** `OrchestratorClient` keeps each loco's last
+reported state (from the snapshot and every `LOCO_STATE`; emptied when the link drops), and
+acquiring replays it to the new throttle exactly as a `LOCO_STATE` would arrive. Taking over a
+loco another operator has at speed 60 therefore shows 60, and the next click moves from there
+— starting from zero made that click command speed 4, or a reversal (F-20). This is the
+display path only: nothing is sent on acquire.
+
 **Release sends nothing.** There is no session to hand back, and this device is not the only
 thing that can drive that loco — an automation run or another operator may be in charge of
 it. Stopping it because one throttle stopped displaying it would be a movement nobody
@@ -209,9 +263,12 @@ stateDiagram-v2
     [*] --> DISCONNECTED
     DISCONNECTED --> CONNECTING : connect()
     CONNECTING --> CONNECTED : IP obtained
-    CONNECTING --> FAILED : Max retries (5)
+    CONNECTED --> CONNECTING : link lost (immediate retries)
+    CONNECTING --> FAILED : 5 immediate retries spent
+    FAILED --> CONNECTED : background retry succeeds
+    FAILED --> CONNECTING : connect()
     CONNECTED --> DISCONNECTED : disconnect()
-    FAILED --> CONNECTING : connect() retry
+    FAILED --> DISCONNECTED : disconnect() / forgetNetwork()
 ```
 
 ### API
@@ -220,8 +277,8 @@ stateDiagram-v2
 |--------|-------------|
 | `initialize()` | Init NVS, WiFi driver, event handlers |
 | `connect()` | Connect using stored NVS credentials |
-| `connect(ssid, password)` | Connect with explicit credentials, save to NVS on success |
-| `disconnect()` | Disconnect WiFi STA |
+| `connect(ssid, password)` | Connect with explicit credentials; saved to NVS only once they produce an IP (F-40) |
+| `disconnect()` | Disconnect WiFi STA and stop retrying |
 | `forgetNetwork()` | Erase NVS credentials |
 | `startScan()` | Trigger async AP scan |
 | `getScanResults()` | Return vector of discovered APs |
@@ -229,6 +286,18 @@ stateDiagram-v2
 | `getStoredSsid()` | Read SSID from NVS |
 | `getIpAddress()` | Current IP as string |
 | `setStateCallback(fn)` | `fn(State, string ip)` |
+
+### Reconnection
+
+After five immediate retries the state reports `FAILED`, but a one-shot `esp_timer` keeps
+retrying — 5 s, doubling, capped at a minute — until the operator disconnects or forgets the
+network (F-24). Giving up for good had meant a router reboot left the device offline, and
+every throttle dead, until someone went into settings. The timer callback does nothing but
+call `esp_wifi_connect()`, which returns at once, so it never blocks the shared `esp_timer`
+task (F-09).
+
+A failed `esp_wifi_set_config` — refused while the station is mid-connect — is reported as
+`FAILED` rather than stopping the device through `ESP_ERROR_CHECK` (F-40).
 
 ### NVS
 
@@ -260,10 +329,32 @@ stateDiagram-v2
 | Method | Description |
 |--------|-------------|
 | `initialize()` | Prepare client state |
-| `connect(host, port=12090)` | TCP connect, send device ID, start receive task |
-| `disconnect()` | Close socket, stop tasks |
+| `connect(host, port=12090)` | Reap any previous session, TCP connect, send `HU<MAC>` and `N<name>`, start receive task, re-acquire every loco still on the record |
+| `disconnect()` | Stop the receive task and close the socket. Keeps the acquisition record |
 | `isConnected()` | Check connection state |
 | `sendHeartbeat()` | Send `*` keepalive |
+| `getHeartbeatPeriodMs()` | Heartbeat period this session, or 0 when the server does no monitoring |
+
+### Sessions and the acquisition record
+
+The client records every loco it acquires, per throttle. That record mirrors what the UI shows
+as allocated, not what the current TCP session holds, so it survives a disconnect of either
+kind: an explicit `disconnect()` or JMRI dropping the link. Every `connect()` re-acquires what
+is on it, and JMRI answers with each loco's speed and direction, which re-seeds the display.
+Only `releaseLocomotive()` removes an entry, whether or not the release reaches the server.
+
+This is F-22's fix. Before it, a JMRI restart left the UI showing every throttle live while
+the new session held nothing, so JMRI ignored the knob and the stop press alike; and the
+reconnect overwrote the old socket without closing it, leaking one of lwIP's ten sockets
+each time.
+
+### Heartbeat (dead-man switch)
+
+After `N`, JMRI announces its heartbeat interval as `*<seconds>`. A non-zero interval makes
+the client send `*+`, which switches monitoring on, and then `*` at half the interval from the
+receive task. If the heartbeats stop — the device crashed, rebooted, lost power or went
+half-open on WiFi — JMRI e-stops this device's locos. Never sending `*+` had left that switch
+off (F-23).
 
 ### API — Throttle Control
 
@@ -291,9 +382,15 @@ stateDiagram-v2
 
 ### Threading
 
-- `withrottle_rx` task (4 KB, priority 5): blocking `recv()` loop, parses messages, fires callbacks.
+- `withrottle_rx` task (4 KB, priority 5): `recv()` loop with a one-second timeout, so it
+  notices a requested shutdown promptly and sends heartbeats when due. Parses messages and
+  fires callbacks. It reads from its own copy of the descriptor; teardown clears `m_socket`
+  under the send mutex before closing, so neither a send nor the receive loop can land on a
+  descriptor lwIP has already handed to another socket.
 - `m_stateMutex`: protects internal `m_throttleStates` map.
 - All callbacks fire from the receive task — callers must handle their own locking.
+- Each received line is logged at DEBUG, not INFO: a console write per line blocked this
+  task (F-38).
 
 ### Protocol Messages Parsed
 
@@ -307,7 +404,7 @@ stateDiagram-v2
 | `M<id>L` | `M0LL41<;>]\[Headlight]\[...` | Function labels |
 | `M<id>+` | `M0+L41<;>` | Loco added confirmation |
 | `M<id>-` | `M0-L41<;>` | Loco removed confirmation |
-| `*` | `*10` | Heartbeat interval |
+| `*` | `*10` | Heartbeat interval; non-zero arms monitoring with `*+` |
 
 ---
 
@@ -332,9 +429,8 @@ Same as WiThrottleClient: `DISCONNECTED → CONNECTING → CONNECTED / FAILED`.
 | `disconnect()` | Close WebSocket |
 | `setPower(bool on)` | Send power command for configured power manager |
 | `getPower()` | Request current power state |
-| `requestPowerList()` | Request all power managers |
 | `startHeartbeat()` | Spawn heartbeat task (ping every 30 s) |
-| `stopHeartbeat()` | Stop heartbeat task |
+| `stopHeartbeat()` | Stop heartbeat task and wait for it to exit (join, then delete). Up to about a second when the task is mid-send (F-31) |
 | `setConfiguredPowerName(name)` | Set power manager name (e.g. `"DCC++"`) |
 
 ### Callbacks

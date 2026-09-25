@@ -6,6 +6,7 @@
 
 #include "../communication/JmriJsonClient.h"
 #include "../communication/WiThrottleClient.h"
+#include "../controller/SettingsWriter.h"
 #include "../controller/ThrottleController.h"
 #include "../controller/WiFiController.h"
 #include "../hardware/RotaryEncoderHal.h"
@@ -33,7 +34,8 @@ SettingsScreen::SettingsScreen(ThrottleController* throttleController,
                                WiFiController* wifiController,
                                RotaryEncoderHal* encoderHal,
                                JmriJsonClient* jsonClient,
-                               WiThrottleClient* wiThrottleClient)
+                               WiThrottleClient* wiThrottleClient,
+                               SettingsWriter* settingsWriter)
     : m_screen(nullptr)
     , m_transportDropdown(nullptr)
     , m_transportNoteLabel(nullptr)
@@ -53,6 +55,7 @@ SettingsScreen::SettingsScreen(ThrottleController* throttleController,
     , m_encoderHal(encoderHal)
     , m_jsonClient(jsonClient)
     , m_wiThrottleClient(wiThrottleClient)
+    , m_settingsWriter(settingsWriter)
     , m_shownTransport(ThrottleTransport::WITHROTTLE)
 {
 }
@@ -322,19 +325,29 @@ void SettingsScreen::saveSpeedSteps()
     if (speedSteps < 1) speedSteps = 1;
     if (speedSteps > 20) speedSteps = 20;
 
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS to save speed steps");
+    if (!m_settingsWriter) {
+        ESP_LOGE(TAG, "No settings writer; speed steps not saved");
         return;
     }
-    nvs_set_i32(handle, NVS_KEY_SPEED_STEPS, speedSteps);
-    nvs_commit(handle);
-    nvs_close(handle);
 
-    if (m_throttleController) {
-        m_throttleController->reloadSpeedStepsFromNvs();
-    }
-    ESP_LOGI(TAG, "Speed steps saved: %d", speedSteps);
+    // Written off the LVGL task (F-39). The controller re-reads it once it is
+    // written; it outlives every screen, so the pointer is safe to capture.
+    ThrottleController* controller = m_throttleController;
+    m_settingsWriter->post([controller, speedSteps]() {
+        nvs_handle_t handle;
+        if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to open NVS to save speed steps");
+            return;
+        }
+        nvs_set_i32(handle, NVS_KEY_SPEED_STEPS, speedSteps);
+        nvs_commit(handle);
+        nvs_close(handle);
+
+        if (controller) {
+            controller->reloadSpeedStepsFromNvs();
+        }
+        ESP_LOGI(TAG, "Speed steps saved: %d", speedSteps);
+    });
 }
 
 void SettingsScreen::updateStatus()
@@ -477,8 +490,18 @@ void SettingsScreen::onTransportChanged(lv_event_t* e)
         return;
     }
 
-    settings.transport = chosen;
-    settings.save();
+    // The read-modify-write itself happens on the writer, after any save
+    // already queued there -- an orchestrator Save made moments ago would
+    // otherwise be overwritten by the copy loaded above (F-39).
+    if (self->m_settingsWriter) {
+        self->m_settingsWriter->post([chosen]() {
+            TransportSettings latest = TransportSettings::load();
+            latest.transport = chosen;
+            latest.save();
+        });
+    } else {
+        ESP_LOGE(TAG, "No settings writer; transport choice not saved");
+    }
 
     if (self->m_transportNoteLabel) {
         // The backend is chosen once, during initialise(), because swapping it

@@ -29,46 +29,46 @@ MainScreen::MainScreen()
     , m_virtualEncoderPanel(nullptr)
 #endif
     , m_throttleController(nullptr)
-    , m_wiThrottleClient(nullptr)
-    , m_jmriClient(nullptr)
 {
     // Throttles are now managed by ThrottleController
 }
 
 MainScreen::~MainScreen()
 {
+    // Deregistering here is not enough to make destroying a MainScreen safe:
+    // a task that has already read the callback can still be waiting on the
+    // LVGL lock to call it. That is why AppController never destroys this
+    // screen (F-21). Kept so that a destruction at teardown is at least tidy.
     if (m_throttleController) {
         m_throttleController->setUIUpdateCallback(nullptr, nullptr);
     }
-    if (m_wiThrottleClient) {
-        m_wiThrottleClient->setConnectionStateCallback(nullptr);
-    }
 
-    // Don't delete LVGL objects here - LVGL manages screen lifecycle
-    // When lv_scr_load() is called with a new screen, LVGL will clean up the old one
-    // Our ThrottleMeter objects will be destroyed naturally with their parent containers
+    // lv_scr_load() does NOT free the screen it replaces, so LVGL objects built
+    // here are only freed by deleting m_screen. Nothing does, deliberately:
+    // this screen lives as long as the application (F-32).
 }
 
-lv_obj_t* MainScreen::create(WiThrottleClient* wiThrottleClient, JmriJsonClient* jmriClient, ThrottleController* throttleController)
+void MainScreen::show()
 {
-    m_wiThrottleClient = wiThrottleClient;
-    m_jmriClient = jmriClient;
+    if (!m_screen) {
+        return;
+    }
+    lv_scr_load(m_screen);
+    updateAllThrottles();
+}
+
+lv_obj_t* MainScreen::create(ThrottleController* throttleController)
+{
     m_throttleController = throttleController;  // Store reference (not owned)
-    
-    // Register UI update callback with the controller
+
+    // The one registration this screen needs. Link up/down reaches it through
+    // here too: the active backend owns the client's connection-state slot and
+    // routes it to ThrottleController::updateUI. Taking that slot from the UI,
+    // as this screen used to, silently cut the backend off from it.
     if (m_throttleController) {
         m_throttleController->setUIUpdateCallback(onUIUpdateNeeded, this);
     }
 
-    if (m_wiThrottleClient) {
-        m_wiThrottleClient->setConnectionStateCallback([this](WiThrottleClient::ConnectionState) {
-            if (lvgl_port_lock(100)) {
-                updateAllThrottles();
-                lvgl_port_unlock();
-            }
-        });
-    }
-    
     // Create a new screen or clean the current one
     m_screen = lv_obj_create(nullptr);
     
@@ -222,6 +222,32 @@ void MainScreen::createSettingsButton()
     lv_label_set_text(jmriLabel, LV_SYMBOL_SETTINGS);
     lv_obj_center(jmriLabel);
 
+    // Emergency stop, in the same bottom row, filling the right half's space
+    // to the left of the two icon buttons (F-27). Always enabled: a stop that
+    // cannot be sent says so in the log rather than hiding the button.
+    lv_obj_t* stopButton = lv_btn_create(m_screen);
+    lv_obj_set_size(stopButton, 220, 44);
+    lv_obj_align(stopButton, LV_ALIGN_BOTTOM_MID, 120, -8);
+    lv_obj_set_style_bg_color(stopButton, UiTheme::colour(UiTheme::BUTTON_EMERGENCY), 0);
+    // On press, not on click: a click needs the release to land on the
+    // button too, and a hand in a hurry slides off it.
+    lv_obj_add_event_cb(stopButton, onEmergencyStopPressed, LV_EVENT_PRESSED, this);
+
+    lv_obj_t* stopLabel = lv_label_create(stopButton);
+    lv_label_set_text(stopLabel, LV_SYMBOL_STOP " E-STOP");
+    lv_obj_set_style_text_font(stopLabel, &lv_font_montserrat_20, 0);
+    lv_obj_center(stopLabel);
+}
+
+void MainScreen::onEmergencyStopPressed(lv_event_t* e)
+{
+    MainScreen* screen = static_cast<MainScreen*>(lv_event_get_user_data(e));
+    if (!screen || !screen->m_throttleController) {
+        return;
+    }
+    // Sends at once; the backend's send is bounded, so this does not stall the
+    // LVGL task the way a connect or an HTTP call would.
+    screen->m_throttleController->emergencyStop();
 }
 
 void MainScreen::onJmriButtonClicked(lv_event_t* e)
@@ -276,12 +302,6 @@ void MainScreen::updateThrottle(int throttleId)
     // every knob dead.
     bool transportConnected = m_throttleController && m_throttleController->isConnected();
 
-    // Repainted here too, so the status label follows the same link state the
-    // knobs do rather than a separate client's.
-    if (m_powerStatusBar) {
-        m_powerStatusBar->refresh();
-    }
-
     // Hide function panel when entering roster selection
     if (snapshot.state == Throttle::State::SELECTING && m_functionPanel && m_functionPanel->isVisible()) {
         m_functionPanel->hide();
@@ -308,6 +328,12 @@ void MainScreen::updateAllThrottles()
 {
     for (int i = 0; i < 4; ++i) {
         updateThrottle(i);
+    }
+
+    // Once per repaint rather than once per throttle (F-38), and from the
+    // same link state the knobs are gated on rather than a separate client's.
+    if (m_powerStatusBar) {
+        m_powerStatusBar->refresh();
     }
 
     if (m_rosterCarousel) {
@@ -431,10 +457,10 @@ void MainScreen::onFunctionButtonClicked(lv_event_t* e)
         return;
     }
 
-    // Through the controller, so the press reaches whichever transport is in
-    // use. Reaching into WiThrottleClient here sent function presses to a
-    // client that was not even connected under the orchestrator transport.
-    screen->m_throttleController->setFunction(throttleId, functionNumber, newState);
+    // The button, not a state: the controller knows whether this transport
+    // wants press and release or a toggle (F-28). Through the controller also
+    // means it reaches whichever transport is in use.
+    screen->m_throttleController->onFunctionButton(throttleId, functionNumber, newState);
 
     // Wait for transport updates to drive UI state
 }
@@ -490,7 +516,7 @@ void MainScreen::onVirtualEncoderRotation(void* userData, int knobId, int delta)
     MainScreen* screen = static_cast<MainScreen*>(userData);
     if (!screen->m_throttleController) return;
     
-    ESP_LOGI(TAG, "Virtual encoder: knob %d rotated %+d", knobId, delta);
+    ESP_LOGD(TAG, "Virtual encoder: knob %d rotated %+d", knobId, delta);
     screen->m_throttleController->onKnobRotation(knobId, delta);
 }
 

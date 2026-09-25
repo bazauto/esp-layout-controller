@@ -45,4 +45,9 @@ private:
     lv_obj_t* m_connectionStatusLabel;
 
     ThrottleController* m_throttleController;
+
+    /** What is on screen, so an unchanged repaint rewrites nothing (F-38).
+     * -1 until first drawn. */
+    int m_drawnTrackPower;
+    int m_drawnConnected;
 };

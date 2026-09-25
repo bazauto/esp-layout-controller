@@ -1,4 +1,5 @@
 #include "ThrottleController.h"
+#include "StackReport.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs_flash.h"
@@ -8,6 +9,17 @@ static const char* TAG = "ThrottleController";
 static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SPEED_STEPS = "speed_steps";
 
+// No legitimate rotation needs more clicks than the whole speed range. The
+// encoder HAL already drops implausible reads; this is the last line before a
+// multiplication that would overflow (F-19).
+static constexpr int MAX_ROTATION_DELTA = 126;
+
+/** The top of the 128-step range every transport here speaks. */
+static constexpr int MAX_SPEED = 126;
+
+/** F0-F28: what the function panel and the model's arrays hold. */
+static constexpr int MAX_FUNCTION_NUMBER = 28;
+
 // The port validates throttle ids against its own bound, so a divergence here
 // would let an id this controller thinks is valid be refused by every backend.
 static_assert(ThrottleController::NUM_THROTTLES == ThrottleBackend::MAX_THROTTLES,
@@ -16,10 +28,6 @@ static_assert(ThrottleController::NUM_THROTTLES == ThrottleBackend::MAX_THROTTLE
 ThrottleController::ThrottleController(ThrottleBackend* backend)
     : m_backend(backend)
     , m_stateMutex(nullptr)
-    , m_uiUpdateCallback(nullptr)
-    , m_uiUpdateUserData(nullptr)
-    , m_trackPowerCallback(nullptr)
-    , m_trackPowerUserData(nullptr)
     , m_pollingTask(nullptr)
     , m_pollingRunning(false)
     , m_cachedSpeedSteps(4)
@@ -50,9 +58,7 @@ ThrottleController::ThrottleController(ThrottleBackend* backend)
         );
         m_backend->setTrackPowerCallback(
             [this](ThrottleBackend::TrackPower state) {
-                if (m_trackPowerCallback) {
-                    m_trackPowerCallback(m_trackPowerUserData, state);
-                }
+                m_trackPowerCallback(state);
             }
         );
         if (m_backend->providesFunctionLabels()) {
@@ -171,6 +177,13 @@ void ThrottleController::onKnobRotation(int knobId, int delta)
 {
     if (knobId < 0 || knobId >= NUM_KNOBS) return;
 
+    if (delta > MAX_ROTATION_DELTA) delta = MAX_ROTATION_DELTA;
+    if (delta < -MAX_ROTATION_DELTA) delta = -MAX_ROTATION_DELTA;
+
+    if (!knobInputAllowed(knobId)) {
+        return;
+    }
+
     if (!lockState(pdMS_TO_TICKS(50))) {
         ESP_LOGW(TAG, "Failed to lock state for knob rotation");
         return;
@@ -237,16 +250,27 @@ void ThrottleController::onKnobRotation(int knobId, int delta)
     unlockState();
 
     if (shouldSendSpeed && throttleId >= 0) {
+        esp_err_t err;
         if (shouldSendDirection) {
             // One movement, not two. Sending the new speed against the old
             // direction first would command the loco faster the way it was
             // already going, and only then reverse it.
-            sendSpeedAndDirectionCommand(throttleId, newSpeed, newDirection);
+            err = sendSpeedAndDirectionCommand(throttleId, newSpeed, newDirection);
         } else {
-            sendSpeedCommand(throttleId, newSpeed);
+            err = sendSpeedCommand(throttleId, newSpeed);
         }
 
-    ESP_LOGI(TAG, "Knob %d changed throttle %d speed: %d -> %d (dir: %s -> %s, steps: %d, optimistic + polling)",
+        // The model was updated before the send, for a responsive display. A
+        // send that failed must not leave it ahead of the loco: the next click
+        // would be computed from a speed the loco never had (F-25).
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Speed command for throttle %d failed (%s); display rolled back",
+                     throttleId, esp_err_to_name(err));
+            rollBackOptimisticUpdate(throttleId, newSpeed, newDirection, currentSpeed,
+                                     currentDirection);
+        }
+
+    ESP_LOGD(TAG, "Knob %d changed throttle %d speed: %d -> %d (dir: %s -> %s, steps: %d, optimistic + polling)",
          knobId,
          throttleId,
          currentSpeed,
@@ -265,6 +289,10 @@ void ThrottleController::onKnobRotation(int knobId, int delta)
 void ThrottleController::onKnobPress(int knobId)
 {
     if (knobId < 0 || knobId >= NUM_KNOBS) return;
+
+    if (!knobInputAllowed(knobId)) {
+        return;
+    }
 
     if (!lockState(pdMS_TO_TICKS(50))) {
         ESP_LOGW(TAG, "Failed to lock state for knob press");
@@ -305,9 +333,13 @@ void ThrottleController::onKnobPress(int knobId)
     } else if (knob->getState() == Knob::State::CONTROLLING) {
         // Normal stop (set speed to 0 with optimistic UI update)
         int throttleId = knob->getAssignedThrottleId();
+        int previousSpeed = 0;
+        bool previousForward = true;
         if (throttleId >= 0) {
             Throttle* throttle = m_throttles[throttleId].get();
             if (throttle) {
+                previousSpeed = throttle->getCurrentSpeed();
+                previousForward = throttle->getDirection();
                 throttle->setSpeed(0);
             }
         }
@@ -315,8 +347,17 @@ void ThrottleController::onKnobPress(int knobId)
         unlockState();
 
         if (throttleId >= 0) {
-            sendSpeedCommand(throttleId, 0);
-            ESP_LOGI(TAG, "Knob %d stop on throttle %d", knobId, throttleId);
+            const esp_err_t err = sendSpeedCommand(throttleId, 0);
+            if (err != ESP_OK) {
+                // Showing a stop that never reached the loco is the worst
+                // thing the display could do here.
+                ESP_LOGE(TAG, "Stop for throttle %d was not sent (%s)", throttleId,
+                         esp_err_to_name(err));
+                rollBackOptimisticUpdate(throttleId, 0, previousForward, previousSpeed,
+                                         previousForward);
+            } else {
+                ESP_LOGI(TAG, "Knob %d stop on throttle %d", knobId, throttleId);
+            }
             updateUI();
         }
         return;
@@ -364,6 +405,92 @@ void ThrottleController::onThrottleFunctions(int throttleId)
     ESP_LOGI(TAG, "Functions button pressed for throttle %d", throttleId);
 }
 
+void ThrottleController::onFunctionButton(int throttleId, int functionNumber, bool pressed)
+{
+    if (!m_backend || throttleId < 0 || throttleId >= NUM_THROTTLES) {
+        return;
+    }
+
+    if (m_backend->functionCommandIsButtonEvent()) {
+        setFunction(throttleId, functionNumber, pressed);
+        return;
+    }
+
+    // The transport stores what it is sent, so the press decides the new
+    // state and the release means nothing. Sending "off" on release made every
+    // function momentary: a headlight lit only while a finger held it (F-28).
+    if (!pressed) {
+        return;
+    }
+    bool current = false;  // A function nothing has reported reads as off.
+    getFunctionState(throttleId, functionNumber, current);
+    setFunction(throttleId, functionNumber, !current);
+}
+
+void ThrottleController::emergencyStop()
+{
+    if (!m_backend) {
+        return;
+    }
+
+    ESP_LOGW(TAG, "EMERGENCY STOP requested");
+    const esp_err_t err = m_backend->emergencyStop();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Emergency stop could not be sent: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Sent: show it. The transport's own reports follow and confirm it.
+    if (lockState(pdMS_TO_TICKS(100))) {
+        for (auto& throttle : m_throttles) {
+            if (throttle->hasLocomotive()) {
+                throttle->setSpeed(0);
+            }
+        }
+        unlockState();
+    }
+    updateUI();
+}
+
+bool ThrottleController::knobInputAllowed(int knobId)
+{
+    if (isConnected()) {
+        return true;
+    }
+
+    // The touch UI greys the knob pips out while the link is down, but the
+    // physical encoders come straight here. A knob that still turned would move
+    // a model that no longer tracks anything real, and the first click after
+    // reconnecting would jump from it (F-25).
+    static int64_t lastWarnMs = 0;
+    const int64_t nowMs = esp_log_timestamp();
+    if (nowMs - lastWarnMs > 1000) {
+        ESP_LOGW(TAG, "Ignoring knob %d while the transport is disconnected", knobId);
+        lastWarnMs = nowMs;
+    }
+    return false;
+}
+
+void ThrottleController::rollBackOptimisticUpdate(int throttleId, int attemptedSpeed,
+                                                  bool attemptedForward, int previousSpeed,
+                                                  bool previousForward)
+{
+    if (throttleId < 0 || throttleId >= NUM_THROTTLES) {
+        return;
+    }
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Failed to lock state to roll back throttle %d", throttleId);
+        return;
+    }
+    Throttle* throttle = m_throttles[throttleId].get();
+    if (throttle->getCurrentSpeed() == attemptedSpeed &&
+        throttle->getDirection() == attemptedForward) {
+        throttle->setSpeed(previousSpeed);
+        throttle->setDirection(previousForward);
+    }
+    unlockState();
+}
+
 #if CONFIG_THROTTLE_TESTS
 Throttle* ThrottleController::getThrottle(int throttleId)
 {
@@ -398,8 +525,13 @@ ThrottleBackend::TrackPower ThrottleController::getTrackPower() const
 void ThrottleController::setTrackPowerCallback(
     void (*callback)(void*, ThrottleBackend::TrackPower), void* userData)
 {
-    m_trackPowerCallback = callback;
-    m_trackPowerUserData = userData;
+    if (!callback) {
+        m_trackPowerCallback.clear();
+        return;
+    }
+    m_trackPowerCallback.set([callback, userData](ThrottleBackend::TrackPower state) {
+        callback(userData, state);
+    });
 }
 
 void ThrottleController::trackPowerTaskFunc(void* arg)
@@ -409,6 +541,7 @@ void ThrottleController::trackPowerTaskFunc(void* arg)
         request->controller->m_backend->setTrackPower(request->on);
     }
     delete request;
+    StackReport::logSelf();
     vTaskDelete(nullptr);
 }
 
@@ -463,15 +596,16 @@ bool ThrottleController::getLocoAtRosterIndex(int index, ThrottleBackend::Roster
 
 void ThrottleController::setUIUpdateCallback(void (*callback)(void*), void* userData)
 {
-    m_uiUpdateCallback = callback;
-    m_uiUpdateUserData = userData;
+    if (!callback) {
+        m_uiUpdateCallback.clear();
+        return;
+    }
+    m_uiUpdateCallback.set([callback, userData]() { callback(userData); });
 }
 
 void ThrottleController::updateUI()
 {
-    if (m_uiUpdateCallback) {
-        m_uiUpdateCallback(m_uiUpdateUserData);
-    }
+    m_uiUpdateCallback();
 }
 
 bool ThrottleController::lockState(TickType_t timeout) const
@@ -606,28 +740,20 @@ bool ThrottleController::getFunctionState(int throttleId, int functionNumber, bo
     return false;
 }
 
-void ThrottleController::sendSpeedCommand(int throttleId, int speed)
+esp_err_t ThrottleController::sendSpeedCommand(int throttleId, int speed)
 {
     if (!m_backend) {
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
-    m_backend->setSpeed(throttleId, speed);
+    return m_backend->setSpeed(throttleId, speed);
 }
 
-void ThrottleController::sendDirectionCommand(int throttleId, bool forward)
+esp_err_t ThrottleController::sendSpeedAndDirectionCommand(int throttleId, int speed, bool forward)
 {
     if (!m_backend) {
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
-    m_backend->setDirection(throttleId, forward);
-}
-
-void ThrottleController::sendSpeedAndDirectionCommand(int throttleId, int speed, bool forward)
-{
-    if (!m_backend) {
-        return;
-    }
-    m_backend->setSpeedAndDirection(throttleId, speed, forward);
+    return m_backend->setSpeedAndDirection(throttleId, speed, forward);
 }
 
 std::unique_ptr<Locomotive> ThrottleController::createLocomotiveFromRoster(const ThrottleBackend::RosterEntry& rosterEntry)
@@ -655,22 +781,39 @@ void ThrottleController::onThrottleStateChanged(const ThrottleBackend::ThrottleU
 
     Throttle* throttle = m_throttles[throttleId].get();
 
-    // Update speed if present
-    if (update.speed >= 0) {
-        throttle->setSpeed(update.speed);
-        ESP_LOGI(TAG, "Throttle %d speed updated: %d", throttleId, update.speed);
+    // A report for a loco this throttle no longer holds is a late reply about
+    // the previous one; applied, it would set the new loco's baseline from the
+    // old loco's state (F-37). Address 0 means the transport named none.
+    const Locomotive* loco = throttle->getLocomotive();
+    if (update.address > 0 && (!loco || loco->getAddress() != update.address)) {
+        const int heldAddress = loco ? loco->getAddress() : 0;
+        unlockState();
+        ESP_LOGD(TAG, "Ignoring update for loco %d: throttle %d holds %d",
+                 update.address, throttleId, heldAddress);
+        return;
     }
 
-    // Update direction if present
+    // Per-update logs are DEBUG: at INFO the console write blocks the
+    // receive task on every report (F-38).
+    if (update.speed > MAX_SPEED) {
+        ESP_LOGW(TAG, "Ignoring out-of-range speed %d for throttle %d", update.speed, throttleId);
+    } else if (update.speed >= 0) {
+        throttle->setSpeed(update.speed);
+        ESP_LOGD(TAG, "Throttle %d speed updated: %d", throttleId, update.speed);
+    }
+
     if (update.direction >= 0) {
         throttle->setDirection(update.direction == 1);
-        ESP_LOGI(TAG, "Throttle %d direction updated: %s", throttleId, update.direction ? "forward" : "reverse");
+        ESP_LOGD(TAG, "Throttle %d direction updated: %s", throttleId, update.direction ? "forward" : "reverse");
     }
 
-    // Update function if present
-    if (update.function >= 0) {
+    // Bounded: each new number grows the throttle's function list and the
+    // panel, and the UI has F0-F28 (F-37).
+    if (update.function > MAX_FUNCTION_NUMBER) {
+        ESP_LOGD(TAG, "Ignoring function %d for throttle %d", update.function, throttleId);
+    } else if (update.function >= 0) {
         throttle->setFunctionState(update.function, update.functionState);
-        ESP_LOGI(TAG, "Throttle %d function %d: %s", throttleId, update.function, update.functionState ? "on" : "off");
+        ESP_LOGD(TAG, "Throttle %d function %d: %s", throttleId, update.function, update.functionState ? "on" : "off");
     }
 
     unlockState();

@@ -5,26 +5,37 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only: the job checks out, builds and uploads an artifact, and needs no
+# more than that. Without this block the token gets the repository's default,
+# which may include write (F-43).
+permissions:
+  contents: read
+
 jobs:
   build:
     name: firmware build
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      # Actions are pinned by commit, not tag: a tag can be moved to other code
+      # after review (F-43). The comment says which release each commit is;
+      # bump both together.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # ESP-IDF version and target both come from dependencies.lock, which the
       # component manager writes. Keep them in step with it — a mismatch here
       # builds something the bench never runs.
       - name: Build firmware
-        uses: espressif/esp-idf-ci-action@v1
+        # `v1` is a branch in this repository, not a tag; this is its head as of
+        # 2026-09-25, which is what `@v1` was running.
+        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d  # v1
         with:
           esp_idf_version: v5.5.2
           target: esp32s3
           path: '.'
 
       - name: Upload firmware
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: esp-layout-controller-firmware
           path: |

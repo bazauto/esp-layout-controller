@@ -36,9 +36,10 @@ exhaustive list.
 - Shared containers read and written from different tasks without a lock (F-07).
 - Accessors that hand out raw pointers to mutex-protected state (F-06). In this repo the
   surviving ones are guarded by `CONFIG_THROTTLE_TESTS` and must stay that way.
-- **Lock ordering: `m_stateMutex` before `lvgl_port_lock`, never the reverse.** Any path
-  that takes them the other way is a deadlock, and it will present as a frozen screen with
-  a train still rolling.
+- **Lock ordering: `lvgl_port_lock` before `m_stateMutex`, never the reverse.** The UI holds
+  the LVGL lock while it reads the controller, so any controller path that calls the UI
+  (`updateUI()`, the power callback) while holding `m_stateMutex` is a deadlock, and it will
+  present as a frozen screen with a train still rolling. (Documented backwards until F-29.)
 
 **LVGL**
 - An LVGL call from a network task, timer, or the encoder task without `lvgl_port_lock`

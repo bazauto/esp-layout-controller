@@ -4,11 +4,13 @@
 #include <vector>
 #include <map>
 #include <functional>
+#include <utility>
 #include "esp_err.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "CallbackSlot.h"
 
 /**
  * @brief WiThrottle Protocol Client for JMRI
@@ -194,6 +196,14 @@ public:
      * @return ESP_OK on success
      */
     esp_err_t setFunction(char throttleId, int function, bool state);
+
+    /**
+     * @brief Emergency-stop every loco this client holds (`M<id>A<addr><;>X`).
+     *
+     * WiThrottle has no layout-wide stop, so this is the strongest one it has.
+     * @return ESP_OK when every held loco was sent the stop (or none is held).
+     */
+    esp_err_t emergencyStopAll();
     
     /**
      * @brief Query locomotive speed
@@ -212,32 +222,32 @@ public:
     /**
      * @brief Set power state change callback
      */
-    void setPowerStateCallback(PowerStateCallback callback) { m_powerCallback = callback; }
+    void setPowerStateCallback(PowerStateCallback callback) { m_powerCallback.set(std::move(callback)); }
     
     /**
      * @brief Set connection state change callback
      */
-    void setConnectionStateCallback(ConnectionStateCallback callback) { m_connectionCallback = callback; }
+    void setConnectionStateCallback(ConnectionStateCallback callback) { m_connectionCallback.set(std::move(callback)); }
     
     /**
      * @brief Set roster update callback
      */
-    void setRosterCallback(RosterCallback callback) { m_rosterCallback = callback; }
+    void setRosterCallback(RosterCallback callback) { m_rosterCallback.set(std::move(callback)); }
     
     /**
      * @brief Set web port discovery callback
      */
-    void setWebPortCallback(WebPortCallback callback) { m_webPortCallback = callback; }
+    void setWebPortCallback(WebPortCallback callback) { m_webPortCallback.set(std::move(callback)); }
     
     /**
      * @brief Set throttle state change callback
      */
-    void setThrottleStateCallback(ThrottleStateCallback callback) { m_throttleCallback = callback; }
+    void setThrottleStateCallback(ThrottleStateCallback callback) { m_throttleCallback.set(std::move(callback)); }
 
     /**
      * @brief Set function labels callback
      */
-    void setFunctionLabelsCallback(FunctionLabelsCallback callback) { m_functionLabelsCallback = callback; }
+    void setFunctionLabelsCallback(FunctionLabelsCallback callback) { m_functionLabelsCallback.set(std::move(callback)); }
 
     /**
     * @brief Get a copy of the current roster (thread-safe)
@@ -269,9 +279,18 @@ public:
     
     /**
      * @brief Send heartbeat (keep-alive)
-     * Should be called periodically when connected
+     * Sent by the receive task at half the server's announced interval.
      */
     void sendHeartbeat();
+
+    /**
+     * @brief How often this session sends a heartbeat, or 0 when off.
+     *
+     * Half the interval the server announced with "*<seconds>". Non-zero means
+     * heartbeat monitoring was switched on with "*+", so JMRI e-stops this
+     * device's locos if the heartbeats stop (F-23).
+     */
+    uint32_t getHeartbeatPeriodMs() const { return m_heartbeatPeriodMs; }
 
 private:
     const std::vector<Locomotive>& getRoster() const { return m_roster; }
@@ -283,8 +302,26 @@ private:
     void handlePowerMessage(const std::string& message);
     void handleRosterMessage(const std::string& message);
     void handleThrottleMessage(const std::string& message);
+    void handleHeartbeatAnnouncement(const std::string& message);
     void setState(ConnectionState newState);
     esp_err_t sendCommand(const std::string& command);
+
+    /**
+     * @brief Stop the receive task and close the socket, if there is one.
+     *
+     * Deliberately leaves the acquisition record alone: that mirrors what the
+     * UI shows as allocated, and the next session re-acquires from it.
+     */
+    void teardownSession();
+
+    /** Re-acquires every loco the record holds, on a fresh session (F-22). */
+    void reacquireLocomotives();
+
+    /** Called by the receive task on every wake; sends "*" when one is due. */
+    void serviceHeartbeat();
+
+    /** Stable per-device id for the "HU" line: the WiFi station MAC. */
+    static std::string deviceId();
     
     static void receiveTask(void* arg);
     
@@ -309,12 +346,13 @@ private:
     std::vector<Locomotive> m_roster;
     uint16_t m_webPort;
     
-    PowerStateCallback m_powerCallback;
-    ConnectionStateCallback m_connectionCallback;
-    RosterCallback m_rosterCallback;
-    WebPortCallback m_webPortCallback;
-    FunctionLabelsCallback m_functionLabelsCallback;
-    ThrottleStateCallback m_throttleCallback;
+    // Set on the LVGL or main task, invoked on the receive task (F-30).
+    CallbackSlot<void(const std::string&, PowerState)> m_powerCallback;
+    CallbackSlot<void(ConnectionState)> m_connectionCallback;
+    CallbackSlot<void(const std::vector<Locomotive>&)> m_rosterCallback;
+    CallbackSlot<void(uint16_t)> m_webPortCallback;
+    CallbackSlot<void(char, const std::vector<std::string>&)> m_functionLabelsCallback;
+    CallbackSlot<void(const ThrottleUpdate&)> m_throttleCallback;
 
     mutable SemaphoreHandle_t m_stateMutex;
     SemaphoreHandle_t m_sendMutex;
@@ -322,4 +360,9 @@ private:
     
     TaskHandle_t m_receiveTaskHandle;
     bool m_running;
+
+    // Touched only by the receive task once it is running, and reset in
+    // connect() before it starts.
+    uint32_t m_heartbeatPeriodMs;
+    int64_t m_lastHeartbeatUs;
 };

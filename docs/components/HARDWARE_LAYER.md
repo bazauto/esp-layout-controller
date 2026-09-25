@@ -25,6 +25,12 @@ HAL for 2× Adafruit I2C QT Rotary Encoders using the Seesaw protocol over I2C. 
 | Encoder delta | `0x11` | `0x40` | Read as int32, auto-resets on read |
 | GPIO bulk | `0x01` | `0x04` | Read 4 bytes, bit 24 = button (active low) |
 
+Each read is two I²C transactions: write the base and offset, wait 500 µs, then read. That is
+the sequence the Seesaw expects, and the one Adafruit's own library uses (with 250 µs). The
+HAL used to send a combined write-read with no gap, which left the Seesaw no time to prepare
+its answer, and made up for it by reading every register twice. Because the delta register
+resets on each read, any rotation between the two reads was lost (F-41).
+
 ### API
 
 | Method | Description |
@@ -32,7 +38,7 @@ HAL for 2× Adafruit I2C QT Rotary Encoders using the Seesaw protocol over I2C. 
 | `initialise()` | I2C scan, configure button pin as input + pullup |
 | `startPollingTask()` | Spawns `rotary_enc` FreeRTOS task |
 | `getStatus(index)` | Returns `EncoderStatus { address, present }` |
-| `setRotationCallback(fn)` | `fn(int knobId, int delta)` — called from polling task |
+| `setRotationCallback(fn)` | `fn(int knobId, int delta)` — called from polling task. A delta beyond ±`MAX_PLAUSIBLE_DELTA` (24) is dropped as a corrupted read and never reaches `fn` (F-19) |
 | `setPressCallback(fn)` | `fn(int knobId, bool pressed)` — edge-detected, called on press down only |
 
 ### Threading

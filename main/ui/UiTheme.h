@@ -49,6 +49,12 @@ constexpr uint32_t BUTTON_CAUTION = 0x8a5a24;
 /** Back, cancel, and anything inactive. */
 constexpr uint32_t BUTTON_NEUTRAL = 0x555555;
 
+/**
+ * Emergency stop. The one saturated button, deliberately: everything else is
+ * muted so that this is the thing a hand finds without looking.
+ */
+constexpr uint32_t BUTTON_EMERGENCY = 0xd62828;
+
 // --- State indicators ------------------------------------------------------
 //
 // Used on small widgets that signal state rather than invite a press: knob

@@ -30,8 +30,8 @@ sequenceDiagram
     AC->>JC: initialize()
 
     AC->>JCC: new(JmriJsonClient, WiThrottleClient, WiFiController)
-    AC->>JCC: startAutoConnectTask()
-    Note over JCC: FreeRTOS task: wait WiFi → load NVS → connect both clients
+    AC->>JCC: start()
+    Note over JCC: jmri_conn task: wait for WiFi → connect both clients → keep them up
 
     AC->>TC: new(WiThrottleClient)
     AC->>TC: initialize()
@@ -49,7 +49,7 @@ sequenceDiagram
     main->>main: lvgl_port_lock(-1)
     main->>AC: show_main_screen()
     AC->>MS: new MainScreen()
-    AC->>MS: create(WT*, JC*, TC*)
+    AC->>MS: create(TC*)
     Note over MS: Build LVGL widgets, register UI update callback
     main->>main: lvgl_port_unlock()
 ```
@@ -58,7 +58,7 @@ sequenceDiagram
 
 1. **Hardware first** — LCD, touch, and I2C bus are initialised before any application code runs.
 2. **WiFi auto-connect** — attempts immediately using stored NVS credentials. Non-blocking.
-3. **JMRI auto-connect** — runs in a background task that waits up to 30 s for WiFi before attempting.
+3. **JMRI auto-connect** — runs on the `jmri_conn` task, which waits for WiFi however long it takes and then keeps both links up. Under the orchestrator, the `orch_connect` supervisor does the same for its link instead.
 4. **Encoder polling** — starts regardless of whether physical encoders are detected. Missing encoders are logged but don't block startup.
 5. **UI last** — the main screen is created after all services are initialised, ensuring it can safely reference all controllers.
 6. **Test mode** — when `CONFIG_THROTTLE_TESTS` is set in Kconfig, `app_main()` calls `run_throttle_tests()` instead of the above sequence.

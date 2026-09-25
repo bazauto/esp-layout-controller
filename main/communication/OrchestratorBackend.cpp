@@ -44,6 +44,10 @@ OrchestratorBackend::OrchestratorBackend(OrchestratorClient* client)
         [this](const OrchestratorClient::LocoState& state) {
             this->onLocoState(state);
         });
+    m_client->setCommandRefusedCallback(
+        [this](const std::string& /*message*/) {
+            this->onCommandRefused();
+        });
 }
 
 OrchestratorBackend::~OrchestratorBackend()
@@ -52,6 +56,7 @@ OrchestratorBackend::~OrchestratorBackend()
     // frame arriving mid-teardown lands in a half-destroyed callback.
     if (m_client) {
         m_client->setLocoStateCallback(nullptr);
+        m_client->setCommandRefusedCallback(nullptr);
         m_client->setConnectionStateCallback(nullptr);
         m_client->setTrackPowerCallback(nullptr);
     }
@@ -111,15 +116,36 @@ esp_err_t OrchestratorBackend::acquireLocomotive(int throttleId, int address, bo
         return ESP_ERR_TIMEOUT;
     }
     m_assignments[throttleId].address = address;
-    // Assume nothing about what the loco is doing. The next LOCO_STATE tells us,
-    // and until then these shadow values only matter if the operator commands
-    // something, which overwrites them anyway.
     m_assignments[throttleId].speed = 0;
     m_assignments[throttleId].forward = true;
     unlock();
 
     ESP_LOGI(TAG, "Throttle %d now drives loco %d (no handshake; the orchestrator has no sessions)",
              throttleId, address);
+
+    // The loco may already be moving -- another operator or an automation run
+    // may have it. Starting from zero would make the first click command
+    // speed 4 to a loco doing 60, or reverse it (F-20). So replay what the
+    // layout last reported, exactly as though that LOCO_STATE had just
+    // arrived. Display-side only: nothing is sent.
+    //
+    // The assignment is already in place, so any LOCO_STATE processed from here
+    // on also reaches this throttle. The second read catches one that landed
+    // between the first read and the publish, which would otherwise leave the
+    // older value on screen.
+    OrchestratorClient::LocoState known;
+    if (m_client && m_client->getLastLocoState(address, known)) {
+        const ThrottleStateCallback callback = m_throttleStateCallback.get();
+        publishToThrottle(throttleId, known, callback);
+
+        OrchestratorClient::LocoState latest;
+        if (m_client->getLastLocoState(address, latest) &&
+            (latest.speed != known.speed || latest.direction != known.direction)) {
+            publishToThrottle(throttleId, latest, callback);
+        }
+    } else {
+        ESP_LOGI(TAG, "Layout has reported nothing for loco %d; starting from stopped", address);
+    }
     return ESP_OK;
 }
 
@@ -256,6 +282,33 @@ esp_err_t OrchestratorBackend::refreshThrottleState(int /*throttleId*/)
     return ESP_OK;
 }
 
+esp_err_t OrchestratorBackend::emergencyStop()
+{
+    if (!m_client) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return m_client->sendEmergencyStop();
+}
+
+void OrchestratorBackend::onCommandRefused()
+{
+    if (!m_client) {
+        return;
+    }
+    const ThrottleStateCallback callback = m_throttleStateCallback.get();
+
+    for (int throttleId = 0; throttleId < MAX_THROTTLES; ++throttleId) {
+        const int address = addressFor(throttleId);
+        if (address == 0) {
+            continue;
+        }
+        OrchestratorClient::LocoState known;
+        if (m_client->getLastLocoState(address, known)) {
+            publishToThrottle(throttleId, known, callback);
+        }
+    }
+}
+
 size_t OrchestratorBackend::getRosterSize() const
 {
     return m_client ? m_client->getRosterSize() : 0;
@@ -282,101 +335,91 @@ bool OrchestratorBackend::getRosterEntry(int index, RosterEntry& outEntry) const
 
 void OrchestratorBackend::onLocoState(const OrchestratorClient::LocoState& state)
 {
-    ThrottleStateCallback callback;
-    if (lock(pdMS_TO_TICKS(50))) {
-        callback = m_throttleStateCallback;
-        unlock();
-    } else {
-        callback = m_throttleStateCallback;
-    }
-
-    if (!callback) {
-        return;
-    }
+    const ThrottleStateCallback callback = m_throttleStateCallback.get();
 
     // A loco can legitimately sit on more than one of this device's throttles,
     // so this is a loop rather than a lookup that stops at the first match.
     for (int throttleId = 0; throttleId < MAX_THROTTLES; ++throttleId) {
-        int address = 0;
-        if (lock(pdMS_TO_TICKS(50))) {
-            address = m_assignments[throttleId].address;
-            if (address == state.address) {
-                // Keep the shadow in step, so a later speed-only change is
-                // paired with the direction the layout actually has.
-                m_assignments[throttleId].speed = state.speed;
-                if (state.direction != OrchestratorClient::Direction::STOP) {
-                    m_assignments[throttleId].forward =
-                        (state.direction == OrchestratorClient::Direction::FORWARD);
-                }
+        publishToThrottle(throttleId, state, callback);
+    }
+}
+
+void OrchestratorBackend::publishToThrottle(int throttleId,
+                                            const OrchestratorClient::LocoState& state,
+                                            const ThrottleStateCallback& callback)
+{
+    if (!isValidThrottle(throttleId)) {
+        return;
+    }
+
+    bool holdsLoco = false;
+    if (lock(pdMS_TO_TICKS(50))) {
+        holdsLoco = (m_assignments[throttleId].address == state.address);
+        if (holdsLoco) {
+            // Keep the shadow in step, so a later speed-only change is paired
+            // with the direction the layout actually has.
+            m_assignments[throttleId].speed = state.speed;
+            if (state.direction != OrchestratorClient::Direction::STOP) {
+                m_assignments[throttleId].forward =
+                    (state.direction == OrchestratorClient::Direction::FORWARD);
             }
-            unlock();
         }
+        unlock();
+    }
 
-        if (address != state.address) {
-            continue;
-        }
+    if (!holdsLoco || !callback) {
+        return;
+    }
 
-        ThrottleUpdate update;
-        update.throttleId = throttleId;
-        update.address = state.address;
-        update.speed = state.speed;
+    ThrottleUpdate update;
+    update.throttleId = throttleId;
+    update.address = state.address;
+    update.speed = state.speed;
 
-        // 'stop' is not a heading, so it leaves the displayed direction alone
-        // rather than being flattened into "reverse".
-        switch (state.direction) {
-            case OrchestratorClient::Direction::FORWARD: update.direction = 1;  break;
-            case OrchestratorClient::Direction::REVERSE: update.direction = 0;  break;
-            case OrchestratorClient::Direction::STOP:
-            default:                                    update.direction = -1; break;
-        }
+    // 'stop' is not a heading, so it leaves the displayed direction alone
+    // rather than being flattened into "reverse".
+    switch (state.direction) {
+        case OrchestratorClient::Direction::FORWARD: update.direction = 1;  break;
+        case OrchestratorClient::Direction::REVERSE: update.direction = 0;  break;
+        case OrchestratorClient::Direction::STOP:
+        default:                                    update.direction = -1; break;
+    }
 
-        callback(update);
+    callback(update);
 
-        // Functions travel one per update, matching the port's shape.
-        for (const auto& fn : state.functions) {
-            ThrottleUpdate fnUpdate;
-            fnUpdate.throttleId = throttleId;
-            fnUpdate.address = state.address;
-            fnUpdate.function = fn.first;
-            fnUpdate.functionState = fn.second;
-            callback(fnUpdate);
-        }
+    // Functions travel one per update, matching the port's shape.
+    for (const auto& fn : state.functions) {
+        ThrottleUpdate fnUpdate;
+        fnUpdate.throttleId = throttleId;
+        fnUpdate.address = state.address;
+        fnUpdate.function = fn.first;
+        fnUpdate.functionState = fn.second;
+        callback(fnUpdate);
     }
 }
 
 void OrchestratorBackend::setThrottleStateCallback(ThrottleStateCallback callback)
 {
-    if (lock(pdMS_TO_TICKS(100))) {
-        m_throttleStateCallback = std::move(callback);
-        unlock();
-    } else {
-        m_throttleStateCallback = std::move(callback);
-    }
+    m_throttleStateCallback.set(std::move(callback));
 }
 
 void OrchestratorBackend::setConnectionStateCallback(ConnectionStateCallback callback)
 {
-    if (lock(pdMS_TO_TICKS(100))) {
-        m_connectionStateCallback = std::move(callback);
-        unlock();
-    } else {
-        m_connectionStateCallback = std::move(callback);
-    }
+    const bool clearing = !callback;
+    m_connectionStateCallback.set(std::move(callback));
 
     if (!m_client) {
         return;
     }
 
-    if (!m_connectionStateCallback) {
+    if (clearing) {
         m_client->setConnectionStateCallback(nullptr);
         return;
     }
 
     m_client->setConnectionStateCallback(
         [this](OrchestratorClient::ConnectionState state) {
-            if (m_connectionStateCallback) {
-                m_connectionStateCallback(toPortState(state));
-            }
+            m_connectionStateCallback(toPortState(state));
         });
 }
 
@@ -403,22 +446,20 @@ ThrottleBackend::TrackPower OrchestratorBackend::getTrackPower() const
 
 void OrchestratorBackend::setTrackPowerCallback(TrackPowerCallback callback)
 {
-    m_trackPowerCallback = std::move(callback);
+    const bool clearing = !callback;
+    m_trackPowerCallback.set(std::move(callback));
 
     if (!m_client) {
         return;
     }
 
-    if (!m_trackPowerCallback) {
+    if (clearing) {
         m_client->setTrackPowerCallback(nullptr);
         return;
     }
 
     m_client->setTrackPowerCallback(
         [this](OrchestratorClient::TrackPower state) {
-            if (!m_trackPowerCallback) {
-                return;
-            }
             switch (state) {
                 case OrchestratorClient::TrackPower::ON:
                     m_trackPowerCallback(TrackPower::ON);

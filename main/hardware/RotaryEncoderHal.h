@@ -32,6 +32,22 @@ public:
     void setRotationCallback(std::function<void(int, int)> callback);
     void setPressCallback(std::function<void(int, bool)> callback);
 
+    /**
+     * @brief Largest delta one poll can plausibly carry.
+     *
+     * A full revolution of a 24-detent encoder between two polls -- several
+     * times faster than a hand spins one. Anything beyond it is a corrupted
+     * read, not a rotation, and must never reach the controller: there it
+     * would be clamped to full speed in one direction or the other (F-19).
+     */
+    static constexpr int32_t MAX_PLAUSIBLE_DELTA = 24;
+
+    /** Public and pure so the bound can be tested without an I2C bus. */
+    static bool isPlausibleDelta(int32_t delta)
+    {
+        return delta >= -MAX_PLAUSIBLE_DELTA && delta <= MAX_PLAUSIBLE_DELTA;
+    }
+
 private:
     static void pollingTask(void* arg);
     void pollOnce();

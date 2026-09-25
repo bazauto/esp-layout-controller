@@ -25,6 +25,8 @@ ThrottleMeter::ThrottleMeter(lv_obj_t* parent, float scale)
     m_directionIndicator = nullptr;
     m_knobAvailable[0] = true;
     m_knobAvailable[1] = true;
+    m_drawnIndicatorLook[0] = -1;
+    m_drawnIndicatorLook[1] = -1;
     m_forwardDirection = true;
     m_lastDisplayedValue = m_value;
     m_lastUnitText.clear();
@@ -283,14 +285,24 @@ void ThrottleMeter::createButtons()
 
 void ThrottleMeter::updateKnobIndicators()
 {
+    // Called three times per throttle on every repaint. Setting a style
+    // invalidates the object even when the value is unchanged (F-38).
+    enum Look { UNAVAILABLE = 0, ACTIVE = 1, AVAILABLE = 2 };
     for (int i = 0; i < 2; i++) {
         if (!m_knobIndicators[i]) continue;
 
-        if (!m_knobAvailable[i]) {
+        const int look = !m_knobAvailable[i] ? UNAVAILABLE
+                         : (m_assignedKnob == i) ? ACTIVE : AVAILABLE;
+        if (look == m_drawnIndicatorLook[i]) {
+            continue;
+        }
+        m_drawnIndicatorLook[i] = look;
+
+        if (look == UNAVAILABLE) {
             // Unavailable (other knob is active) - gray out
             lv_obj_set_style_bg_color(m_knobIndicators[i], UiTheme::colour(UiTheme::STATE_INACTIVE), 0);
             lv_obj_add_state(m_knobIndicators[i], LV_STATE_DISABLED);
-        } else if (m_assignedKnob == i) {
+        } else if (look == ACTIVE) {
             // Active knob - highlight
             lv_obj_set_style_bg_color(m_knobIndicators[i], UiTheme::colour(UiTheme::STATE_ACTIVE), 0);
             lv_obj_clear_state(m_knobIndicators[i], LV_STATE_DISABLED);

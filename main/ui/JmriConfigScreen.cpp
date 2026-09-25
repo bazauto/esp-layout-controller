@@ -3,38 +3,16 @@
 #include "wrappers/main_screen_wrapper.h"
 #include "wrappers/settings_wrapper.h"
 #include "esp_log.h"
-#include "../controller/ThrottleController.h"
-#include "../controller/WiFiController.h"
-#include "../hardware/RotaryEncoderHal.h"
-#include "esp_app_desc.h"
-#include "esp_chip_info.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "../controller/JmriConnectionController.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "lvgl_port.h"
+#include <cstdlib>
 #include <cstring>
-#include <memory>
-
-namespace {
-struct JmriConnectTaskArgs {
-    JmriConfigScreen* screen;
-    JmriJsonClient* jsonClient;
-    WiThrottleClient* wiThrottleClient;
-    std::string serverIp;
-    std::string powerManager;
-    uint16_t wiThrottlePort;
-};
-}
-
-extern "C" {
-    bool lvgl_port_lock(int timeout_ms);
-    void lvgl_port_unlock(void);
-}
 
 static const char* TAG = "JmriConfigScreen";
 
-// NVS keys for JMRI settings
+// NVS keys for JMRI settings. Read here to fill the form; written only by
+// JmriConnectionController.
 static const char* NVS_NAMESPACE = "jmri";
 static const char* NVS_KEY_SERVER_IP = "server_ip";
 static const char* NVS_KEY_WITHROTTLE_PORT = "wt_port";
@@ -42,9 +20,7 @@ static const char* NVS_KEY_POWER_MANAGER = "power_mgr";
 
 JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
                                    WiThrottleClient& wiThrottleClient,
-                                   WiFiController* wifiController,
-                                   RotaryEncoderHal* encoderHal,
-                                   ThrottleController* throttleController)
+                                   JmriConnectionController* connection)
     : m_screen(nullptr)
     , m_serverIpInput(nullptr)
     , m_wiThrottlePortInput(nullptr)
@@ -56,20 +32,34 @@ JmriConfigScreen::JmriConfigScreen(JmriJsonClient& jsonClient,
     , m_backButton(nullptr)
     , m_keyboard(nullptr)
     , m_keyboardLabel(nullptr)
-    , m_connectInProgress(false)
+    , m_statusTimer(nullptr)
     , m_jsonClient(jsonClient)
     , m_wiThrottleClient(wiThrottleClient)
-    , m_wifiController(wifiController)
-    , m_encoderHal(encoderHal)
-    , m_throttleController(throttleController)
+    , m_connection(connection)
 {
 }
 
 JmriConfigScreen::~JmriConfigScreen()
 {
-    // Deregister callbacks to prevent dangling this pointer
-    m_jsonClient.setConnectionStateCallback(nullptr);
-    m_wiThrottleClient.setConnectionStateCallback(nullptr);
+    stopStatusTimer();
+}
+
+void JmriConfigScreen::statusTimerCb(lv_timer_t* timer)
+{
+    // Runs on the LVGL task, so no lock is needed here.
+    // LVGL 8.4 has no lv_timer_get_user_data; the field is read directly.
+    auto* self = static_cast<JmriConfigScreen*>(timer->user_data);
+    if (self) {
+        self->updateStatus();
+    }
+}
+
+void JmriConfigScreen::stopStatusTimer()
+{
+    if (m_statusTimer) {
+        lv_timer_del(m_statusTimer);
+        m_statusTimer = nullptr;
+    }
 }
 
 lv_obj_t* JmriConfigScreen::create()
@@ -105,20 +95,11 @@ lv_obj_t* JmriConfigScreen::create()
     createButtonSection(buttonContainer);
     createKeyboard();
 
-    m_jsonClient.setConnectionStateCallback([this](JmriJsonClient::ConnectionState) {
-        if (lvgl_port_lock(100)) {
-            updateStatus();
-            lvgl_port_unlock();
-        }
-    });
+    // Polled, not registered on either client's connection callback: see
+    // statusTimerCb. Twice a second is plenty for two status labels.
+    stopStatusTimer();
+    m_statusTimer = lv_timer_create(statusTimerCb, 500, this);
 
-    m_wiThrottleClient.setConnectionStateCallback([this](WiThrottleClient::ConnectionState) {
-        if (lvgl_port_lock(100)) {
-            updateStatus();
-            lvgl_port_unlock();
-        }
-    });
-    
     // Load saved settings
     loadSettings();
     
@@ -349,7 +330,8 @@ void JmriConfigScreen::updateStatus()
 
     auto jsonState = m_jsonClient.getState();
     auto wiThrottleState = m_wiThrottleClient.getState();
-    bool isConnecting = m_connectInProgress.load() ||
+    const bool busy = m_connection && m_connection->isBusy();
+    bool isConnecting = busy ||
                         wiThrottleState == WiThrottleClient::ConnectionState::CONNECTING ||
                         jsonState == JmriJsonClient::ConnectionState::CONNECTING;
     bool isConnected = wiThrottleState == WiThrottleClient::ConnectionState::CONNECTED ||
@@ -382,7 +364,7 @@ void JmriConfigScreen::updateStatus()
             break;
         case WiThrottleClient::ConnectionState::DISCONNECTED:
         default:
-            if (m_connectInProgress.load()) {
+            if (busy) {
                 wiThrottleText = "Connecting...";
             }
             break;
@@ -402,7 +384,7 @@ void JmriConfigScreen::updateStatus()
             break;
         case JmriJsonClient::ConnectionState::DISCONNECTED:
         default:
-            if (m_connectInProgress.load()) {
+            if (busy) {
                 jsonText = "Waiting...";
             }
             break;
@@ -414,120 +396,45 @@ void JmriConfigScreen::updateStatus()
 
 void JmriConfigScreen::connectToJmri()
 {
-    if (m_connectInProgress.exchange(true)) {
-        ESP_LOGW(TAG, "JMRI connection already in progress");
+    if (!m_connection) {
+        ESP_LOGE(TAG, "No JMRI connection controller");
         return;
     }
 
-    std::string serverIp = getServerIpText();
-    std::string wtPortStr = getWiThrottlePortText();
-    std::string powerMgr = getPowerManagerText();
-    
+    const std::string serverIp = getServerIpText();
     if (serverIp.empty()) {
-        m_connectInProgress.store(false);
         ESP_LOGW(TAG, "Server IP is empty");
         return;
     }
-    
-    // Parse WiThrottle port
-    uint16_t wtPort = wtPortStr.empty() ? 12090 : std::atoi(wtPortStr.c_str());
-    
-    // Set power manager name (use default if empty)
-    if (powerMgr.empty()) {
-        powerMgr = "DCC++";
-    }
 
-    saveSettings();
-
-    auto* args = new JmriConnectTaskArgs{
-        this,
-        &m_jsonClient,
-        &m_wiThrottleClient,
-        serverIp,
-        powerMgr,
-        wtPort,
-    };
-
-    if (xTaskCreate(connectTask, "jmri_connect", 6144, args, 4, nullptr) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to start JMRI connect task");
-        delete args;
-        m_connectInProgress.store(false);
-    }
-
-    updateStatus();
-}
-
-void JmriConfigScreen::connectTask(void* arg)
-{
-    std::unique_ptr<JmriConnectTaskArgs> args(static_cast<JmriConnectTaskArgs*>(arg));
-
-    args->jsonClient->setConfiguredPowerName(args->powerManager);
-
-    ESP_LOGI(TAG, "Connecting to JMRI server: %s (WiThrottle:%d, Power:%s)",
-             args->serverIp.c_str(), args->wiThrottlePort, args->powerManager.c_str());
-
-    esp_err_t err = args->wiThrottleClient->connect(args->serverIp, args->wiThrottlePort);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to connect WiThrottle client");
-    } else {
-        args->wiThrottleClient->setWebPortCallback([
-            jsonClient = args->jsonClient,
-            serverIp = args->serverIp
-        ](uint16_t jsonPort) {
-            ESP_LOGI(TAG, "Auto-connecting JSON client to port %d", jsonPort);
-            esp_err_t jsonErr = jsonClient->connect(serverIp, jsonPort);
-            if (jsonErr != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to connect JSON client");
-            }
-        });
-    }
-
-    args->screen->m_connectInProgress.store(false);
-    if (lvgl_port_lock(200)) {
-        if (args->screen->m_screen) {
-            args->screen->updateStatus();
+    // Anything that is not a valid port falls back to the WiThrottle default
+    // rather than being truncated into a different one.
+    const std::string wtPortText = getWiThrottlePortText();
+    uint16_t wtPort = 12090;
+    if (!wtPortText.empty()) {
+        const long parsed = std::strtol(wtPortText.c_str(), nullptr, 10);
+        if (parsed > 0 && parsed <= 65535) {
+            wtPort = static_cast<uint16_t>(parsed);
         }
-        lvgl_port_unlock();
     }
 
-    vTaskDelete(nullptr);
+    // Saved and connected on the controller's task, never here: this is an
+    // LVGL event handler (F-05, F-34). The status timer shows the result.
+    m_connection->requestConnect(serverIp, wtPort, getPowerManagerText());
+    updateStatus();
 }
 
 void JmriConfigScreen::disconnectFromJmri()
 {
     ESP_LOGI(TAG, "Disconnecting from JMRI server");
-    
-    m_jsonClient.disconnect();
-    m_wiThrottleClient.disconnect();
-    
+
+    // Carried out on the controller's task: disconnecting waits for the
+    // receive task to exit, which must not freeze the screen (F-34). It also
+    // stops the reconnecting, so it sticks.
+    if (m_connection) {
+        m_connection->requestDisconnect();
+    }
     updateStatus();
-}
-
-void JmriConfigScreen::saveSettings()
-{
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
-        return;
-    }
-    
-    std::string serverIp = getServerIpText();
-    std::string wtPort = getWiThrottlePortText();
-    std::string powerMgr = getPowerManagerText();
-    
-    nvs_set_str(handle, NVS_KEY_SERVER_IP, serverIp.c_str());
-    nvs_set_str(handle, NVS_KEY_WITHROTTLE_PORT, wtPort.c_str());
-    nvs_set_str(handle, NVS_KEY_POWER_MANAGER, powerMgr.c_str());
-    
-    nvs_commit(handle);
-    nvs_close(handle);
-
-    if (m_throttleController) {
-        m_throttleController->reloadSpeedStepsFromNvs();
-    }
-    
-    ESP_LOGI(TAG, "JMRI settings saved (Power Manager: %s)", powerMgr.c_str());
 }
 
 void JmriConfigScreen::loadSettings()
@@ -612,8 +519,8 @@ void JmriConfigScreen::onBackButtonClicked(lv_event_t* e)
     // Hide keyboard if visible
     screen->hideKeyboard();
 
-    screen->m_jsonClient.setConnectionStateCallback(nullptr);
-    screen->m_wiThrottleClient.setConnectionStateCallback(nullptr);
+    // Stop the poll before the widgets go, or it paints a deleted label.
+    screen->stopStatusTimer();
     
     // Back to settings, which is where this screen is reached from.
     show_settings_screen();

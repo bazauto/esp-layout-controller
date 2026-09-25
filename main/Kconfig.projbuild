@@ -123,4 +123,15 @@ menu "ESP-Layout-Controller Configuration"
                 Build and run Unity-based tests for the throttle/knob state machines
                 instead of launching the UI. Intended for on-device validation.
     endmenu
+
+    menu "Diagnostics"
+        config THROTTLE_STACK_REPORT
+            bool "Log task stack headroom"
+            default n
+            help
+                Every 10 s, log the least free stack each application task has had
+                so far; one-shot tasks log theirs as they exit. For sizing the
+                stacks in docs/architecture/THREADING_MODEL.md on the bench (F-33).
+                Leave off in normal use.
+    endmenu
 endmenu

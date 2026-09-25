@@ -72,6 +72,8 @@ sequenceDiagram
 
 ## Notes
 
-- **Momentary vs latching:** The current implementation sends function ON on press and OFF on release (momentary behaviour). Some functions (e.g. headlight) may need latching — this depends on the JMRI/decoder configuration.
+- **Momentary vs latching depends on the transport** (F-28). The UI reports the *button*, via `ThrottleController::onFunctionButton(throttle, fn, pressed)`, and the controller asks the port's `functionCommandIsButtonEvent()`:
+  - **WiThrottle** (true): ON at press, OFF at release. JMRI applies each function's own latching setting to that pair.
+  - **Orchestrator** (false): `FUNCTION_COMMAND` stores the state it is sent, so press-on/release-off made every function momentary. A press sends the opposite of the known state; the release sends nothing. The display follows the `LOCO_STATE` the orchestrator publishes after it.
 - **Scroll guard:** `FunctionPanel::isScrolling()` prevents accidental button presses while scrolling through the function list.
 - **Maximum functions:** 29 (F0–F28), matching DCC standard.

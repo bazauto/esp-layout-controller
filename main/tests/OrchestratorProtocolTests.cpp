@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "JsonArraySplitter.h"
 #include "OrchestratorBackend.h"
 #include "OrchestratorClient.h"
 
@@ -373,6 +374,244 @@ static void test_orch_backend_release_sends_nothing(void)
     TEST_ASSERT_NOT_EQUAL(ESP_OK, backend.setSpeed(1, 10));
 }
 
+namespace {
+
+/** The layout already has 4472 running in reverse, headlight on. */
+const char* SNAPSHOT_WITH_4472_RUNNING =
+    "{\"type\":\"STATE_SNAPSHOT\",\"payload\":{"
+    "\"systemStatus\":\"online\","
+    "\"locos\":{"
+    "\"4472\":{\"address\":4472,\"speed\":60,\"direction\":\"rev\","
+    "\"functions\":{\"0\":true}}}}}";
+
+}  // namespace
+
+static void test_orch_backend_acquire_seeds_from_layout_state(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    std::vector<ThrottleBackend::ThrottleUpdate> updates;
+    backend.setThrottleStateCallback(
+        [&updates](const ThrottleBackend::ThrottleUpdate& u) { updates.push_back(u); });
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    // Not on any throttle yet, so nothing is displayed.
+    TEST_ASSERT_EQUAL_INT(0, (int)updates.size());
+
+    // Taking it over must start from what it is doing, not from stopped (F-20):
+    // otherwise the first click commands speed 4, or reverse, to a loco doing 60.
+    TEST_ASSERT_EQUAL(ESP_OK, backend.acquireLocomotive(1, 4472, true));
+
+    TEST_ASSERT_GREATER_THAN_INT(0, (int)updates.size());
+    TEST_ASSERT_EQUAL_INT(1, updates[0].throttleId);
+    TEST_ASSERT_EQUAL_INT(60, updates[0].speed);
+    TEST_ASSERT_EQUAL_INT(0, updates[0].direction);
+
+    bool sawHeadlight = false;
+    for (const auto& u : updates) {
+        if (u.function == 0 && u.functionState) {
+            sawHeadlight = true;
+        }
+    }
+    TEST_ASSERT_TRUE(sawHeadlight);
+}
+
+static void test_orch_backend_acquire_of_unreported_loco_shows_nothing(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    std::vector<ThrottleBackend::ThrottleUpdate> updates;
+    backend.setThrottleStateCallback(
+        [&updates](const ThrottleBackend::ThrottleUpdate& u) { updates.push_back(u); });
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    TEST_ASSERT_EQUAL(ESP_OK, backend.acquireLocomotive(0, 12, false));
+
+    // Nothing known about 12, so nothing is invented for it.
+    TEST_ASSERT_EQUAL_INT(0, (int)updates.size());
+}
+
+static void test_orch_snapshot_replaces_cached_state(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    OrchestratorClient::LocoState state;
+    TEST_ASSERT_TRUE(client.getLastLocoState(4472, state));
+    TEST_ASSERT_EQUAL_INT(60, state.speed);
+    TEST_ASSERT_TRUE(state.direction == OrchestratorClient::Direction::REVERSE);
+
+    // A later LOCO_STATE updates it...
+    client.testHandleMessage(
+        "{\"type\":\"LOCO_STATE\",\"payload\":"
+        "{\"address\":4472,\"speed\":20,\"direction\":\"fwd\"}}");
+    TEST_ASSERT_TRUE(client.getLastLocoState(4472, state));
+    TEST_ASSERT_EQUAL_INT(20, state.speed);
+
+    // ...and a snapshot that no longer mentions it means the layout knows
+    // nothing of it: the cached state must not outlive that.
+    client.testHandleMessage(
+        "{\"type\":\"STATE_SNAPSHOT\",\"payload\":{"
+        "\"systemStatus\":\"online\",\"locos\":{}}}");
+    TEST_ASSERT_FALSE(client.getLastLocoState(4472, state));
+}
+
+static void test_orch_backend_refusal_reseeds_from_layout_state(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    std::vector<ThrottleBackend::ThrottleUpdate> updates;
+    backend.setThrottleStateCallback(
+        [&updates](const ThrottleBackend::ThrottleUpdate& u) { updates.push_back(u); });
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    backend.acquireLocomotive(1, 4472, true);
+    updates.clear();
+
+    // An ERROR names no command, but the display may already show what was
+    // asked for. It is put back to what the layout last reported (F-25).
+    client.testHandleMessage(
+        "{\"type\":\"ERROR\",\"payload\":{\"message\":\"Cannot issue command: system is offline\"}}");
+
+    TEST_ASSERT_GREATER_THAN_INT(0, (int)updates.size());
+    TEST_ASSERT_EQUAL_INT(1, updates[0].throttleId);
+    TEST_ASSERT_EQUAL_INT(60, updates[0].speed);
+    TEST_ASSERT_EQUAL_INT(0, updates[0].direction);
+}
+
+static void test_orch_backend_function_commands_are_states(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    // FUNCTION_COMMAND sets the state outright, so the controller must toggle
+    // rather than send press and release (F-28).
+    TEST_ASSERT_FALSE(backend.functionCommandIsButtonEvent());
+}
+
+// --- Roster streaming (F-35) -------------------------------------------------
+
+namespace {
+
+/** Feeds text through a splitter one byte at a time, so every element
+ * straddles a chunk boundary, and collects what it hands over. */
+bool splitBytewise(JsonArraySplitter& splitter, const std::string& text,
+                   std::vector<std::string>& elements)
+{
+    bool ok = true;
+    for (char c : text) {
+        ok = splitter.feed(&c, 1, [&elements](const std::string& element) {
+            elements.push_back(element);
+            return true;
+        });
+    }
+    return ok;
+}
+
+}  // namespace
+
+static void test_roster_splitter_yields_each_record(void)
+{
+    JsonArraySplitter splitter(4096);
+    std::vector<std::string> elements;
+    const std::string roster =
+        " [ {\"address\":3,\"name\":\"Shunter\"} ,\n"
+        "{\"address\":4472,\"name\":\"Flying Scotsman\",\"tags\":[1,2]} ] ";
+
+    TEST_ASSERT_TRUE(splitBytewise(splitter, roster, elements));
+    TEST_ASSERT_TRUE(splitter.complete());
+    TEST_ASSERT_EQUAL_INT(2, (int)elements.size());
+    TEST_ASSERT_EQUAL_STRING("{\"address\":3,\"name\":\"Shunter\"}", elements[0].c_str());
+    TEST_ASSERT_EQUAL_STRING(
+        "{\"address\":4472,\"name\":\"Flying Scotsman\",\"tags\":[1,2]}", elements[1].c_str());
+}
+
+static void test_roster_splitter_ignores_brackets_inside_strings(void)
+{
+    JsonArraySplitter splitter(4096);
+    std::vector<std::string> elements;
+    // Braces, brackets and an escaped quote inside a name must not end the record.
+    const std::string roster = "[{\"name\":\"A } ] \\\" {\",\"address\":7}]";
+
+    TEST_ASSERT_TRUE(splitBytewise(splitter, roster, elements));
+    TEST_ASSERT_TRUE(splitter.complete());
+    TEST_ASSERT_EQUAL_INT(1, (int)elements.size());
+    TEST_ASSERT_EQUAL_STRING("{\"name\":\"A } ] \\\" {\",\"address\":7}", elements[0].c_str());
+}
+
+static void test_roster_splitter_empty_array(void)
+{
+    JsonArraySplitter splitter(4096);
+    std::vector<std::string> elements;
+    TEST_ASSERT_TRUE(splitBytewise(splitter, "[]", elements));
+    TEST_ASSERT_TRUE(splitter.complete());
+    TEST_ASSERT_EQUAL_INT(0, (int)elements.size());
+}
+
+static void test_roster_splitter_truncated_is_not_complete(void)
+{
+    JsonArraySplitter splitter(4096);
+    std::vector<std::string> elements;
+    // Cut off mid-record: the caller must refuse this, not keep the first loco.
+    TEST_ASSERT_TRUE(splitBytewise(splitter, "[{\"address\":3},{\"addr", elements));
+    TEST_ASSERT_FALSE(splitter.complete());
+    TEST_ASSERT_FALSE(splitter.failed());
+}
+
+static void test_roster_splitter_refuses_malformed_streams(void)
+{
+    const char* malformed[] = {
+        "{\"address\":3}",   // not an array
+        "[1,2,3]",           // bare values, not records
+        "[{\"a\":1},]",      // trailing comma
+        "[{\"a\":1}{\"a\":2}]",  // missing comma
+        "[{\"a\":1}] x",     // trailing garbage
+    };
+    for (const char* text : malformed) {
+        JsonArraySplitter splitter(4096);
+        std::vector<std::string> elements;
+        TEST_ASSERT_FALSE_MESSAGE(splitBytewise(splitter, text, elements), text);
+        TEST_ASSERT_TRUE_MESSAGE(splitter.failed(), text);
+    }
+}
+
+static void test_roster_splitter_skips_oversized_record(void)
+{
+    JsonArraySplitter splitter(32);
+    std::vector<std::string> elements;
+    const std::string big = "{\"address\":5,\"name\":\"" + std::string(64, 'x') + "\"}";
+    const std::string roster = "[{\"address\":3}," + big + ",{\"address\":4}]";
+
+    // One record too long costs that loco, not the roster.
+    TEST_ASSERT_TRUE(splitBytewise(splitter, roster, elements));
+    TEST_ASSERT_TRUE(splitter.complete());
+    TEST_ASSERT_EQUAL_INT(2, (int)elements.size());
+    TEST_ASSERT_EQUAL_INT(1, (int)splitter.oversizedElements());
+    TEST_ASSERT_EQUAL_STRING("{\"address\":4}", elements[1].c_str());
+}
+
+static void test_roster_splitter_callback_refusal_fails_stream(void)
+{
+    JsonArraySplitter splitter(4096);
+    const std::string roster = "[{\"a\":1},{\"a\":2}]";
+    int seen = 0;
+    const bool ok = splitter.feed(roster.data(), roster.size(), [&seen](const std::string&) {
+        ++seen;
+        return false;
+    });
+    TEST_ASSERT_FALSE(ok);
+    TEST_ASSERT_TRUE(splitter.failed());
+    TEST_ASSERT_EQUAL_INT(1, seen);
+}
+
 extern "C" void register_orchestrator_tests(void)
 {
     RUN_TEST(test_orch_cookie_extracted_from_set_cookie);
@@ -396,4 +635,16 @@ extern "C" void register_orchestrator_tests(void)
     RUN_TEST(test_orch_backend_refuses_commands_without_a_loco);
     RUN_TEST(test_orch_backend_routes_state_to_matching_throttle);
     RUN_TEST(test_orch_backend_release_sends_nothing);
+    RUN_TEST(test_orch_backend_acquire_seeds_from_layout_state);
+    RUN_TEST(test_orch_backend_acquire_of_unreported_loco_shows_nothing);
+    RUN_TEST(test_orch_snapshot_replaces_cached_state);
+    RUN_TEST(test_orch_backend_refusal_reseeds_from_layout_state);
+    RUN_TEST(test_orch_backend_function_commands_are_states);
+    RUN_TEST(test_roster_splitter_yields_each_record);
+    RUN_TEST(test_roster_splitter_ignores_brackets_inside_strings);
+    RUN_TEST(test_roster_splitter_empty_array);
+    RUN_TEST(test_roster_splitter_truncated_is_not_complete);
+    RUN_TEST(test_roster_splitter_refuses_malformed_streams);
+    RUN_TEST(test_roster_splitter_skips_oversized_record);
+    RUN_TEST(test_roster_splitter_callback_refusal_fails_stream);
 }

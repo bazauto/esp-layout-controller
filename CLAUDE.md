@@ -19,8 +19,9 @@ and stop as soon as you know enough:
    diagrams per flow, per-layer reference, protocol wire formats.
 
 `docs/REVIEW_REMEDIATION_PLAN.md` is the record of a completed hardening pass (F-01…F-18,
-all Done). Read a finding when you are about to touch the code it covers — several of the
-"why is it written like this" answers live there and nowhere else.
+all Done); `docs/REVIEW_REMEDIATION_PLAN_2.md` is the second pass (F-19…F-44, in progress,
+with a per-finding status). Read a finding when you are about to touch the code it covers —
+several of the "why is it written like this" answers live there and nowhere else.
 
 **`.github/copilot-instructions.md` covers the same conventions for Copilot.** Where the
 two overlap they must be changed together; where they disagree, this file wins for Claude,
@@ -68,9 +69,11 @@ skipped (speed, direction — the next one will land), `-1` only for critical on
 updates. F-14 removed an infinite lock from a frequently-called path; do not reintroduce
 that shape.
 
-**3. Lock ordering is fixed: `m_stateMutex` before `lvgl_port_lock`, never the reverse.**
-`ThrottleController` guards its own state with a mutex separate from the LVGL port lock.
-Taking them in the other order deadlocks.
+**3. Lock ordering is fixed: `lvgl_port_lock` before `m_stateMutex`, never the reverse.**
+`ThrottleController` guards its own state with a mutex separate from the LVGL port lock. The
+UI takes the LVGL lock and then reads the controller — every event handler, every repaint —
+so the controller must never call out to the UI (`updateUI()`, the power callback) while
+holding its mutex. Documented the other way round until F-29.
 
 **4. State lives at the application layer, never in the UI.** `AppController` owns the
 clients and `ThrottleController`; `ThrottleController` owns the `Throttle` / `Knob` /
@@ -89,10 +92,12 @@ main/
 ├── communication/  ThrottleBackend (port), WiThrottleBackend, OrchestratorBackend,
 │                   WiFiManager, WiThrottleClient (TCP), JmriJsonClient (WebSocket),
 │                   OrchestratorClient (WebSocket control plane)
-├── controller/     AppController, ThrottleController, WiFiController, JmriConnectionController
-└── ui/             SettingsScreen (transport choice, device settings, status),
-                    JmriConfigScreen and OrchestratorConfigScreen (one per
-                    transport), MainScreen, components
+├── controller/     AppController, ThrottleController, WiFiController, JmriConnectionController,
+│                   SettingsWriter (the UI's NVS writes, off the LVGL task)
+├── ui/             SettingsScreen (transport choice, device settings, status),
+│                   JmriConfigScreen and OrchestratorConfigScreen (one per
+│                   transport), MainScreen, components
+└── utils/          CallbackSlot (cross-task callbacks), StackReport (diagnostics)
 ```
 
 Dependency direction is one way: `ui` → `controller` → `communication` / `model`. A model
@@ -177,6 +182,11 @@ Things that look like bugs or oversights and are not. One line each.
 - **`getThrottle` / `getKnob` bypass `m_stateMutex` and are guarded by
   `CONFIG_THROTTLE_TESTS`** — deliberately unsafe test-only accessors (F-06 removed the
   unguarded ones). They must never gain a non-test caller.
+- **`MainScreen` is built once and never destroyed** (F-21). Rebuilding it freed it under a
+  task already waiting on the LVGL lock to repaint it. Constraint 4 is about where state
+  lives, not a licence to rebuild this screen.
+- **No UI class registers on a client's connection callback.** Those are single slots owned by
+  the active backend; config screens poll on an LVGL timer instead (F-21, F-30).
 - **`JmriJsonClient` parses JSON by substring search** (`extractJsonString` /
   `extractJsonInt`) rather than with a parser. Adequate for the narrow JMRI subset it
   reads; **not** adequate for orchestrator payloads. `OrchestratorClient` uses cJSON and
@@ -190,8 +200,9 @@ Things that look like bugs or oversights and are not. One line each.
   (F-18), not an oversight.
 - **`json_port` is normally discovered from the WiThrottle `PW` message**, not configured,
   which is why it has a default and no prominent UI field.
-- **K1/K2 are disabled while WiThrottle is disconnected** (472a955) — a knob that still
-  turned would move a model that no longer tracks anything real.
+- **K1/K2 are disabled while the transport is disconnected** (472a955, F-25) — a knob that
+  still turned would move a model that no longer tracks anything real. Enforced in
+  `ThrottleController`, because the physical encoders never pass through the UI.
 - **`sdkconfig.tests` is tracked despite appearing in `.gitignore`** — it predates the
   ignore rule. `sdkconfig.test.defaults` is the file that actually matters.
 - **`CONFIG_WS_BUFFER_SIZE=16384` is not oversizing.** It sizes the WebSocket *handshake*
@@ -211,3 +222,9 @@ Things that look like bugs or oversights and are not. One line each.
   orchestrator's `locos` table stores no labels, so a WebSocket-connected device would show
   `F0`…`F28`. Being fixed orchestrator-side: labels become operator-authored per loco.
 - **No OTA.** See the flash budget above.
+- **The orchestrator link is cleartext, and whether to keep it so is undecided (F-36).**
+  The login, the 30-day session cookie and the control plane all cross the layout WiFi in
+  the clear. WiThrottle is no better: it has no authentication at all. TLS costs almost no
+  flash, because `esp_websocket_client` already links mbedTLS, but it does cost heap per
+  connection, and the orchestrator would have to serve it. The measured figures and the
+  options are in `docs/REVIEW_REMEDIATION_PLAN_2.md`.

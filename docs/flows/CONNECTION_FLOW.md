@@ -35,7 +35,7 @@ sequenceDiagram
     AC->>AC: TransportSettings::load()
     Note over AC: Orchestrator selected,<br/>so JMRI auto-connect is skipped
     AC->>OT: startOrchestratorConnectTask()
-    OT->>OT: wait for WiFi (up to 30 s)
+    OT->>OT: wait for WiFi (however long it takes)
 
     OT->>OC: connect(host, port, user, pass)
     OC->>ORCH: POST /api/auth/login
@@ -53,13 +53,27 @@ sequenceDiagram
     OC->>ORCH: GET /api/layouts
     OC->>ORCH: GET /api/layouts/{id}/locos
     ORCH-->>OC: roster
-    Note over OT: task deletes itself
+    Note over OT: task stays, supervising the link
 
     loop while connected
         ORCH-->>OC: LOCO_STATE / SYSTEM_STATUS / HEARTBEAT
         OC->>OB: parsed, or refused outright
     end
 ```
+
+### Orchestrator reconnection
+
+`orch_connect` runs for the life of the application and is the only thing that calls
+`OrchestratorClient::connect()` (F-24):
+
+- It waits for WiFi however long that takes, then logs in.
+- A failed login is retried with backoff — 5 s, doubling, capped at a minute, which keeps
+  under the orchestrator's five-logins-a-minute limit.
+- A dropped socket first gets 30 s of `esp_websocket_client`'s own reconnect, which reuses the
+  session cookie. If it is still down after that, the supervisor logs in afresh.
+- A roster read that fails after a good login is retried every 30 s.
+- **Connect** on the orchestrator config screen saves the settings and wakes the supervisor,
+  which logs in at once with them.
 
 ---
 
@@ -96,9 +110,8 @@ sequenceDiagram
 
     Note over JCC,JMRI_JSON: Phase 2: JMRI (background task)
 
-    JCC->>JCC: jmri_autoconn task: poll WiFi (30s max)
-    JCC->>JCC: loadSettingsAndAutoConnect()
-    JCC->>JCC: Read NVS (server_ip, wt_port, power_mgr)
+    JCC->>JCC: start(): read NVS (server_ip, wt_port, json_port, power_mgr)
+    JCC->>JCC: jmri_conn task: wait for WiFi (however long it takes)
 
     JCC->>WT: connect(serverIp, 12090)
     WT->>JMRI_WT: TCP connect
@@ -110,8 +123,9 @@ sequenceDiagram
     WT-->>JCC: PowerStateCallback(state)
     JMRI_WT-->>WT: PW12080 (web port)
     WT-->>JCC: WebPortCallback(12080)
+    Note over JCC: recorded only; the jmri_conn task<br/>moves the JSON client if the port differs
 
-    JCC->>JC: connect(serverIp, 12080)
+    JCC->>JC: connect(serverIp, json_port)
     JC->>JMRI_JSON: WebSocket /json/
     JMRI_JSON-->>JC: {"type":"hello",...}
     JC->>JMRI_JSON: Subscribe to power updates
@@ -119,31 +133,43 @@ sequenceDiagram
 
     Note over JCC: Phase 3: Auto-reconnect
 
-    JCC->>JCC: enableAutoReconnect(true)
-    Note over JCC: jmri_reconnect task:\nmonitor every 5s,\nexponential backoff (5s→60s)
+    Note over JCC: the same jmri_conn task keeps both links up:\nchecks every second, reconnects with backoff (5s→60s)
 ```
 
 ---
 
 ## Auto-Reconnect Behaviour
 
+Every JMRI connect and disconnect — at boot, after an outage, and from the config screen — runs
+on the one `jmri_conn` task (F-34). The screen only asks.
+
 ```mermaid
 flowchart TD
-    A["jmri_reconnect task\n(runs every 5s)"] --> B{"WiFi connected?"}
-    B -->|No| C["Reset backoff\nWait 5s"]
-    C --> A
-    B -->|Yes| D{"WiThrottle connected?"}
-    D -->|Yes| E{"JSON connected?"}
-    D -->|No| F["Attempt WiThrottle connect"]
-    F --> G{"Success?"}
-    G -->|Yes| A
-    G -->|No| H["Exponential backoff\n(5s → 10s → 20s → 40s → 60s cap)"]
-    H --> A
-    E -->|Yes| I["All connected ✓\nReset backoff"]
-    I --> A
-    E -->|No| J["Attempt JSON connect"]
-    J --> A
+    A["jmri_conn task\n(every 1 s, or at once on a request)"] --> R{"Request?"}
+    R -->|Disconnect| S["Disconnect both\nstop reconnecting"]
+    S --> A
+    R -->|Connect| T["Save settings\ndisconnect both\nattempt now"]
+    T --> B
+    R -->|None| B{"Server saved,\nreconnect on,\nWiFi up?"}
+    B -->|No| A
+    B -->|Yes| D{"Both links up?"}
+    D -->|Yes| E["Reset backoff"]
+    E --> A
+    D -->|No| F{"Backoff elapsed?"}
+    F -->|No| A
+    F -->|Yes| G["Connect whichever is down\n(JSON only if not already connecting)\nbackoff 5s → 10s → … → 60s cap"]
+    G --> A
 ```
+
+- **Disconnect sticks.** It turns reconnecting off until the next Connect or a reboot. The old
+  reconnect task undid it within five seconds.
+- **WiFi is waited for indefinitely.** The old auto-connect gave up after 30 s and never
+  started reconnecting (F-24).
+- **The JSON port** comes from WiThrottle's `PW` line. The receive task only records it; the
+  worker saves it as `json_port` and moves the JSON client if it changed. Connecting the JSON
+  client from the receive task raced the reconnect task (F-34).
+- **Under the orchestrator** the task is never started, and Connect on the JMRI screen only
+  saves the settings, through the `SettingsWriter` (F-39).
 
 ## WiFi Config Screen
 
@@ -151,4 +177,8 @@ If WiFi credentials are not stored (first boot) or the user navigates to setting
 - Network scanning
 - SSID/password entry with on-screen keyboard
 - Connect/disconnect/forget actions
-- Credentials saved to NVS on successful connection
+- Credentials saved to NVS on successful connection — only then, so a mistyped password does
+  not replace a good one (F-40)
+- After five immediate retries the connection shows as failed but keeps retrying in the
+  background (5 s, doubling, capped at a minute) until the operator presses Disconnect or
+  Forget, which both stay available while it does (F-24)

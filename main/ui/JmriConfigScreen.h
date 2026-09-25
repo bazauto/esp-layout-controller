@@ -4,7 +4,6 @@
 #include "../communication/JmriJsonClient.h"
 #include "../communication/WiThrottleClient.h"
 #include "../controller/TransportSettings.h"
-#include <atomic>
 #include <string>
 
 /**
@@ -17,19 +16,17 @@
  * - View connection status
  * - Connect/Disconnect from server
  * 
- * Settings are persisted in NVS and auto-connect at startup
+ * Connecting, disconnecting and saving are all JmriConnectionController's:
+ * this screen asks and shows the result, and never blocks the LVGL task on the
+ * network or NVS (F-34).
  */
-class WiFiController;
-class RotaryEncoderHal;
-class ThrottleController;
+class JmriConnectionController;
 
 class JmriConfigScreen {
 public:
-    explicit JmriConfigScreen(JmriJsonClient& jsonClient,
-                              WiThrottleClient& wiThrottleClient,
-                              WiFiController* wifiController,
-                              RotaryEncoderHal* encoderHal,
-                              ThrottleController* throttleController);
+    JmriConfigScreen(JmriJsonClient& jsonClient,
+                     WiThrottleClient& wiThrottleClient,
+                     JmriConnectionController* connection);
     ~JmriConfigScreen();
     
     // Delete copy/move
@@ -61,7 +58,6 @@ private:
     
     void connectToJmri();
     void disconnectFromJmri();
-    void saveSettings();
     void loadSettings();
     void clearUiPointers();
     
@@ -75,7 +71,15 @@ private:
     static void onBackButtonClicked(lv_event_t* e);
     static void onTextAreaFocused(lv_event_t* e);
     static void onTextAreaDefocused(lv_event_t* e);
-    static void connectTask(void* arg);
+
+    /**
+     * Status is polled on an LVGL timer, not pushed through either client's
+     * connection callback. Those are single slots, and the WiThrottle one
+     * belongs to the active backend: taking it here, and nulling it on Back,
+     * cut the knob gating off from the link state (F-21, F-30).
+     */
+    static void statusTimerCb(lv_timer_t* timer);
+    void stopStatusTimer();
     
     // LVGL objects
     lv_obj_t* m_screen;
@@ -89,14 +93,12 @@ private:
     lv_obj_t* m_backButton;
     lv_obj_t* m_keyboard;
     lv_obj_t* m_keyboardLabel;
-    std::atomic<bool> m_connectInProgress;
+    lv_timer_t* m_statusTimer;
     
     // Client references
     JmriJsonClient& m_jsonClient;
     WiThrottleClient& m_wiThrottleClient;
-    WiFiController* m_wifiController;
-    RotaryEncoderHal* m_encoderHal;
-    ThrottleController* m_throttleController;
+    JmriConnectionController* m_connection;
     
     // Constants
     static constexpr int SCREEN_WIDTH = 800;

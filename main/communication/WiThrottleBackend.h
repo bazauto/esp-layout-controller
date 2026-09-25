@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CallbackSlot.h"
 #include "JmriJsonClient.h"
 #include "ThrottleBackend.h"
 #include "WiThrottleClient.h"
@@ -38,6 +39,9 @@ public:
     bool providesFunctionLabels() const override { return true; }
     bool requiresPolling() const override { return true; }
 
+    /** JMRI applies each function's latching setting to a press and release. */
+    bool functionCommandIsButtonEvent() const override { return true; }
+
     bool isConnected() const override;
     ConnectionState getState() const override;
 
@@ -47,6 +51,7 @@ public:
     esp_err_t setDirection(int throttleId, bool forward) override;
     esp_err_t setFunction(int throttleId, int function, bool state) override;
     esp_err_t refreshThrottleState(int throttleId) override;
+    esp_err_t emergencyStop() override;
 
     size_t getRosterSize() const override;
     bool getRosterEntry(int index, RosterEntry& outEntry) const override;
@@ -73,8 +78,9 @@ private:
 
     // Held so the lambdas registered on the client stay valid, and so a second
     // setThrottleStateCallback replaces the first rather than stacking.
-    ThrottleStateCallback m_throttleStateCallback;
-    FunctionLabelsCallback m_functionLabelsCallback;
-    ConnectionStateCallback m_connectionStateCallback;
-    TrackPowerCallback m_trackPowerCallback;
+    // Set on the main task, invoked on the clients' tasks (F-30).
+    CallbackSlot<void(const ThrottleUpdate&)> m_throttleStateCallback;
+    CallbackSlot<void(int, const std::vector<std::string>&)> m_functionLabelsCallback;
+    CallbackSlot<void(ConnectionState)> m_connectionStateCallback;
+    CallbackSlot<void(TrackPower)> m_trackPowerCallback;
 };

@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "JsonArraySplitter.h"
+
 #include "cJSON.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -11,8 +13,25 @@ static const char* TAG = "OrchestratorClient";
 
 namespace {
 
-/** Login and roster reads are small; this caps a hostile or broken response. */
+/** How long a sender waits for a re-login to finish with the socket handle.
+ * A send itself times out after 1 s, so this covers one in progress. */
+constexpr int CLIENT_LOCK_WAIT_MS = 1500;
+
+/** How long disconnect() waits for a send in progress to let go of the handle. */
+constexpr int CLIENT_LOCK_TEARDOWN_WAIT_MS = 5000;
+
+/** Login and layout-list reads are small; this caps a hostile or broken
+ * response. The roster is streamed instead, so it has no such cap (F-35). */
 constexpr int HTTP_RESPONSE_LIMIT = 8192;
+
+/** One loco record is a few hundred bytes today. The headroom is for the
+ * operator-authored function labels the orchestrator is gaining; a record past
+ * it is skipped, not the whole roster. */
+constexpr size_t MAX_ROSTER_RECORD_BYTES = 4096;
+
+/** Bounds the roster's RAM, and the carousel's length, whatever the server
+ * sends. Matches the loco state cache. */
+constexpr size_t MAX_ROSTER_ENTRIES = 128;
 
 /** A STATE_SNAPSHOT carrying a whole layout is the largest frame we expect. */
 constexpr size_t MAX_FRAME_BYTES = 24576;
@@ -59,6 +78,49 @@ esp_err_t httpEventHandler(esp_http_client_event_t* evt)
     return ESP_OK;
 }
 
+/** Parses one roster record. Returns false when it is not a JSON object. */
+bool parseRosterRecord(const std::string& element, OrchestratorClient::RosterEntry& out,
+                       bool& usable);
+
+/** Accumulates the roster as the response streams in (F-35). */
+struct RosterStream {
+    JsonArraySplitter splitter{MAX_ROSTER_RECORD_BYTES};
+    std::vector<OrchestratorClient::RosterEntry> roster;
+    size_t dropped = 0;
+};
+
+esp_err_t rosterEventHandler(esp_http_client_event_t* evt)
+{
+    auto* stream = static_cast<RosterStream*>(evt->user_data);
+    if (!stream || evt->event_id != HTTP_EVENT_ON_DATA || evt->data_len <= 0 || !evt->data) {
+        return ESP_OK;
+    }
+    // Only a 200's body is a roster; an error page is judged by its status.
+    if (esp_http_client_get_status_code(evt->client) != 200) {
+        return ESP_OK;
+    }
+
+    stream->splitter.feed(
+        static_cast<const char*>(evt->data), static_cast<size_t>(evt->data_len),
+        [stream](const std::string& element) {
+            OrchestratorClient::RosterEntry entry;
+            bool usable = false;
+            if (!parseRosterRecord(element, entry, usable)) {
+                return false;
+            }
+            if (!usable) {
+                return true;
+            }
+            if (stream->roster.size() >= MAX_ROSTER_ENTRIES) {
+                ++stream->dropped;
+                return true;
+            }
+            stream->roster.push_back(std::move(entry));
+            return true;
+        });
+    return ESP_OK;
+}
+
 /** Reads a required string field. Returns false when absent or not a string. */
 bool jsonString(const cJSON* obj, const char* key, std::string& out)
 {
@@ -87,6 +149,26 @@ bool jsonInt(const cJSON* obj, const char* key, int& out)
         return false;
     }
     out = static_cast<int>(value);
+    return true;
+}
+
+bool parseRosterRecord(const std::string& element, OrchestratorClient::RosterEntry& out,
+                       bool& usable)
+{
+    cJSON* record = cJSON_Parse(element.c_str());
+    if (!cJSON_IsObject(record)) {
+        ESP_LOGE(TAG, "Refusing roster: a record is not a JSON object");
+        if (record) cJSON_Delete(record);
+        return false;
+    }
+
+    // A record with no usable address is skipped, as before: it cannot be
+    // driven, but it says nothing about the rest.
+    usable = jsonInt(record, "address", out.address) && out.address > 0;
+    if (usable && (!jsonString(record, "name", out.name) || out.name.empty())) {
+        out.name = "Loco " + std::to_string(out.address);
+    }
+    cJSON_Delete(record);
     return true;
 }
 
@@ -120,8 +202,10 @@ bool wireToSystemStatus(const std::string& wire, OrchestratorClient::SystemStatu
 
 OrchestratorClient::OrchestratorClient()
     : m_client(nullptr)
+    , m_clientMutex(nullptr)
     , m_state(ConnectionState::DISCONNECTED)
     , m_port(DEFAULT_PORT)
+    , m_rxInMessage(false)
     , m_systemStatus(SystemStatus::UNKNOWN)
     , m_trackPower(TrackPower::UNKNOWN)
     , m_lastMessageUs(0)
@@ -136,6 +220,10 @@ OrchestratorClient::~OrchestratorClient()
         vSemaphoreDelete(m_stateMutex);
         m_stateMutex = nullptr;
     }
+    if (m_clientMutex) {
+        vSemaphoreDelete(m_clientMutex);
+        m_clientMutex = nullptr;
+    }
 }
 
 esp_err_t OrchestratorClient::initialize()
@@ -144,6 +232,13 @@ esp_err_t OrchestratorClient::initialize()
         m_stateMutex = xSemaphoreCreateMutex();
         if (!m_stateMutex) {
             ESP_LOGE(TAG, "Failed to create state mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!m_clientMutex) {
+        m_clientMutex = xSemaphoreCreateMutex();
+        if (!m_clientMutex) {
+            ESP_LOGE(TAG, "Failed to create socket handle mutex");
             return ESP_ERR_NO_MEM;
         }
     }
@@ -165,27 +260,9 @@ void OrchestratorClient::unlockState() const
 
 void OrchestratorClient::setState(ConnectionState newState)
 {
-    ConnectionStateCallback callback;
-    bool changed = false;
-
-    if (lockState(pdMS_TO_TICKS(100))) {
-        changed = (m_state != newState);
-        m_state = newState;
-        callback = m_connectionCallback;
-        unlockState();
-    } else {
-        // Never let a lock timeout lose a state change: the UI's view of
-        // whether the link is up gates whether knobs are live.
-        m_state = newState;
-        callback = m_connectionCallback;
-        changed = true;
-    }
-
-    if (changed) {
+    if (m_state.exchange(newState) != newState) {
         ESP_LOGI(TAG, "Connection state: %s", stateName(newState));
-        if (callback) {
-            callback(newState);
-        }
+        m_connectionCallback(newState);
     }
 }
 
@@ -196,24 +273,12 @@ bool OrchestratorClient::isConnected() const
 
 OrchestratorClient::ConnectionState OrchestratorClient::getState() const
 {
-    ConnectionState state = ConnectionState::DISCONNECTED;
-    if (lockState(pdMS_TO_TICKS(50))) {
-        state = m_state;
-        unlockState();
-    } else {
-        state = m_state;
-    }
-    return state;
+    return m_state.load();
 }
 
 OrchestratorClient::SystemStatus OrchestratorClient::getSystemStatus() const
 {
-    SystemStatus status = SystemStatus::UNKNOWN;
-    if (lockState(pdMS_TO_TICKS(50))) {
-        status = m_systemStatus;
-        unlockState();
-    }
-    return status;
+    return m_systemStatus.load();
 }
 
 uint32_t OrchestratorClient::secondsSinceLastMessage() const
@@ -253,8 +318,18 @@ esp_err_t OrchestratorClient::connect(const std::string& host,
 
     disconnect();
 
+    // Under the lock: the power and roster requests read these on other
+    // tasks. The layout id is forgotten on every login, so a new host -- or a
+    // layout recreated on the same one -- is never addressed by a stale id
+    // (F-42). It costs one GET per login.
+    if (!lockState(pdMS_TO_TICKS(1000))) {
+        ESP_LOGE(TAG, "Could not lock to set the host");
+        return ESP_ERR_TIMEOUT;
+    }
     m_host = host;
     m_port = port;
+    m_layoutId.clear();
+    unlockState();
 
     setState(ConnectionState::AUTHENTICATING);
     esp_err_t err = authenticate(host, port, username, password);
@@ -342,12 +417,14 @@ esp_err_t OrchestratorClient::authenticate(const std::string& host,
         return ESP_ERR_NOT_FOUND;
     }
 
-    if (lockState(pdMS_TO_TICKS(200))) {
-        m_sessionToken = token;
-        unlockState();
-    } else {
-        m_sessionToken = token;
+    // Not written unlocked on a timeout (F-42): the power and roster
+    // requests read it from other tasks. The supervisor just logs in again.
+    if (!lockState(pdMS_TO_TICKS(200))) {
+        ESP_LOGE(TAG, "Could not lock to store the session cookie");
+        return ESP_ERR_TIMEOUT;
     }
+    m_sessionToken = token;
+    unlockState();
 
     ESP_LOGI(TAG, "Authenticated; session cookie acquired");
     return ESP_OK;
@@ -402,42 +479,71 @@ esp_err_t OrchestratorClient::openSocket(const std::string& host, uint16_t port)
     // across several events; m_rxBuffer reassembles it.
     cfg.buffer_size = 4096;
 
-    m_client = esp_websocket_client_init(&cfg);
-    if (!m_client) {
+    esp_websocket_client_handle_t client = esp_websocket_client_init(&cfg);
+    if (!client) {
         ESP_LOGE(TAG, "Failed to create WebSocket client");
         return ESP_FAIL;
     }
 
-    esp_websocket_register_events(m_client, WEBSOCKET_EVENT_ANY, websocketEventHandler, this);
+    esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, websocketEventHandler, this);
 
     ESP_LOGI(TAG, "Opening control plane at %s", m_uri.c_str());
-    esp_err_t err = esp_websocket_client_start(m_client);
+    esp_err_t err = esp_websocket_client_start(client);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start WebSocket client: %s", esp_err_to_name(err));
-        esp_websocket_client_destroy(m_client);
-        m_client = nullptr;
+        esp_websocket_client_destroy(client);
         return err;
+    }
+
+    // Published only once it is running, and under the handle mutex (F-26).
+    if (m_clientMutex) {
+        xSemaphoreTake(m_clientMutex, portMAX_DELAY);
+    }
+    m_client = client;
+    if (m_clientMutex) {
+        xSemaphoreGive(m_clientMutex);
     }
     return ESP_OK;
 }
 
 void OrchestratorClient::disconnect()
 {
-    if (m_client) {
+    // Held across stop and destroy, so no sender can be inside the handle
+    // while it is freed (F-26). Bounded: a sender holds it for at most one
+    // send, which times out after a second.
+    const bool haveClientLock =
+        m_clientMutex &&
+        xSemaphoreTake(m_clientMutex, pdMS_TO_TICKS(CLIENT_LOCK_TEARDOWN_WAIT_MS)) == pdTRUE;
+    if (m_clientMutex && !haveClientLock) {
+        ESP_LOGE(TAG, "Socket handle still in use after %d ms; tearing down anyway",
+                 CLIENT_LOCK_TEARDOWN_WAIT_MS);
+    }
+    esp_websocket_client_handle_t client = m_client;
+    m_client = nullptr;
+    if (client) {
         ESP_LOGI(TAG, "Disconnecting from orchestrator");
-        esp_websocket_client_stop(m_client);
-        esp_websocket_client_destroy(m_client);
-        m_client = nullptr;
+        esp_websocket_client_stop(client);
+        esp_websocket_client_destroy(client);
+    }
+    if (haveClientLock) {
+        xSemaphoreGive(m_clientMutex);
     }
 
-    if (lockState(pdMS_TO_TICKS(200))) {
-        m_rxBuffer.clear();
+    // The WebSocket task is gone, so the reassembly state has no other user.
+    m_rxBuffer.clear();
+    m_rxInMessage = false;
+
+    // A cookie that outlives a failed clear is harmless: the next connect()
+    // logs in again and overwrites it. Writing it unlocked is not (F-42).
+    if (lockState(pdMS_TO_TICKS(1000))) {
         m_sessionToken.clear();
         unlockState();
     } else {
-        m_rxBuffer.clear();
-        m_sessionToken.clear();
+        ESP_LOGE(TAG, "Could not lock to clear the session cookie");
     }
+
+    // What the layout told us is no longer current once we stop listening.
+    clearLocoStates();
 
     setState(ConnectionState::DISCONNECTED);
 }
@@ -463,6 +569,12 @@ void OrchestratorClient::websocketEventHandler(void* handlerArgs,
 
         case WEBSOCKET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Control plane disconnected");
+            // A message cut off by the drop never gets its FIN.
+            self->m_rxBuffer.clear();
+            self->m_rxInMessage = false;
+            // Stale from here on; the snapshot that opens the next connection
+            // refills it.
+            self->clearLocoStates();
             self->setState(ConnectionState::DISCONNECTED);
             break;
 
@@ -472,39 +584,58 @@ void OrchestratorClient::websocketEventHandler(void* handlerArgs,
             break;
 
         case WEBSOCKET_EVENT_DATA: {
-            // Opcode 1 is text. Ignore ping/pong/close frames, and ignore
-            // binary: the control plane is JSON text only.
-            if (data->op_code != 0x01 && data->op_code != 0x00) {
-                break;
-            }
-            if (data->data_len <= 0 || !data->data_ptr) {
+            // Text (1) opens a message and continuation (0) extends one. Ping,
+            // pong, close and binary frames are not ours: the control plane is
+            // JSON text only.
+            const bool isText = data->op_code == 0x01;
+            const bool isContinuation = data->op_code == 0x00;
+            if (!isText && !isContinuation) {
                 break;
             }
 
-            // A frame larger than the receive buffer arrives in several events,
-            // with payload_offset telling us where each piece belongs.
+            // Two kinds of splitting. A frame larger than the receive buffer
+            // arrives in several events, payload_offset saying where each
+            // piece sits in its frame. A message may also span several frames:
+            // text without FIN, then continuations, the last carrying FIN.
+            // The buffer used to be cleared at every frame's start, which
+            // parsed each fragment alone and refused them all (F-42).
             if (data->payload_offset == 0) {
-                self->m_rxBuffer.clear();
+                if (isText) {
+                    self->m_rxBuffer.clear();
+                    self->m_rxInMessage = true;
+                } else if (!self->m_rxInMessage) {
+                    ESP_LOGW(TAG, "Dropping a continuation frame with no message open");
+                    break;
+                }
+            }
+            if (!self->m_rxInMessage) {
+                break;  // the rest of a message already dropped
             }
 
-            if (self->m_rxBuffer.size() + data->data_len > MAX_FRAME_BYTES) {
-                ESP_LOGW(TAG, "Dropping oversized frame (>%u bytes)",
-                         static_cast<unsigned>(MAX_FRAME_BYTES));
-                self->m_rxBuffer.clear();
+            if (data->data_len > 0 && data->data_ptr) {
+                if (self->m_rxBuffer.size() + data->data_len > MAX_FRAME_BYTES) {
+                    ESP_LOGW(TAG, "Dropping oversized message (>%u bytes)",
+                             static_cast<unsigned>(MAX_FRAME_BYTES));
+                    self->m_rxBuffer.clear();
+                    self->m_rxInMessage = false;
+                    break;
+                }
+                self->m_rxBuffer.append(data->data_ptr, data->data_len);
+            }
+
+            // Only parse once this frame is whole and it is the message's last.
+            const bool frameComplete =
+                data->payload_offset + data->data_len >= data->payload_len;
+            if (!frameComplete || !data->fin) {
                 break;
             }
 
-            self->m_rxBuffer.append(data->data_ptr, data->data_len);
-
-            // Only parse once the whole payload has arrived.
-            if (data->payload_len > 0 &&
-                self->m_rxBuffer.size() < static_cast<size_t>(data->payload_len)) {
-                break;
+            self->m_rxInMessage = false;
+            std::string message;
+            message.swap(self->m_rxBuffer);
+            if (!message.empty()) {
+                self->handleMessage(message);
             }
-
-            std::string frame;
-            frame.swap(self->m_rxBuffer);
-            self->handleMessage(frame);
             break;
         }
 
@@ -555,6 +686,8 @@ void OrchestratorClient::handleMessage(const std::string& json)
         } else {
             ESP_LOGE(TAG, "Orchestrator reported an error with no message");
         }
+
+        m_commandRefusedCallback(message);
     } else {
         // Blocks, points, routes, sensors and faults are all real messages this
         // device has no use for. Not an error -- just not ours.
@@ -583,15 +716,8 @@ void OrchestratorClient::handleStateSnapshot(const void* payloadPtr)
                 reason = reasonItem->valuestring;
             }
 
-            SystemStatusCallback callback;
-            if (lockState(pdMS_TO_TICKS(50))) {
-                m_systemStatus = status;
-                callback = m_systemStatusCallback;
-                unlockState();
-            }
-            if (callback) {
-                callback(status, reason);
-            }
+            m_systemStatus = status;
+            m_systemStatusCallback(status, reason);
         }
     }
 
@@ -601,6 +727,10 @@ void OrchestratorClient::handleStateSnapshot(const void* payloadPtr)
     if (cJSON_IsObject(dccLink)) {
         handleDccLink(dccLink);
     }
+
+    // The snapshot is the layout's whole belief, so a loco it does not mention
+    // is one it knows nothing about: nothing cached before it still stands.
+    clearLocoStates();
 
     // `locos` is an object keyed by address. This is the layout's belief about
     // what is already moving -- it updates what we display, and is never
@@ -670,17 +800,11 @@ void OrchestratorClient::handleLocoState(const void* payloadPtr)
         }
     }
 
-    LocoStateCallback callback;
-    if (lockState(pdMS_TO_TICKS(50))) {
-        callback = m_locoStateCallback;
-        unlockState();
-    } else {
-        callback = m_locoStateCallback;
-    }
+    // Cached before dispatch, so a throttle taking this loco over from now on
+    // starts from this state even if it is not assigned anywhere yet (F-20).
+    cacheLocoState(state);
 
-    if (callback) {
-        callback(state);
-    }
+    m_locoStateCallback(state);
 }
 
 void OrchestratorClient::handleDccLink(const void* payloadPtr)
@@ -704,37 +828,17 @@ void OrchestratorClient::handleDccLink(const void* payloadPtr)
         return;
     }
 
-    TrackPowerCallback callback;
-    bool changed = false;
-    if (lockState(pdMS_TO_TICKS(50))) {
-        changed = (m_trackPower != power);
-        m_trackPower = power;
-        callback = m_trackPowerCallback;
-        unlockState();
-    } else {
-        changed = (m_trackPower != power);
-        m_trackPower = power;
-        callback = m_trackPowerCallback;
-    }
-
-    if (changed) {
+    if (m_trackPower.exchange(power) != power) {
         ESP_LOGI(TAG, "Track power: %s",
                  power == TrackPower::ON ? "on"
                      : power == TrackPower::OFF ? "off" : "unknown");
-        if (callback) {
-            callback(power);
-        }
+        m_trackPowerCallback(power);
     }
 }
 
 OrchestratorClient::TrackPower OrchestratorClient::getTrackPower() const
 {
-    TrackPower power = TrackPower::UNKNOWN;
-    if (lockState(pdMS_TO_TICKS(50))) {
-        power = m_trackPower;
-        unlockState();
-    }
-    return power;
+    return m_trackPower.load();
 }
 
 esp_err_t OrchestratorClient::setTrackPower(bool on)
@@ -861,9 +965,17 @@ std::string OrchestratorClient::getLayoutId()
         return std::string();
     }
 
+    // The first layout, as it always has been: the orchestrator runs one. Said
+    // aloud when that stops being true, rather than driving the wrong one
+    // silently.
+    const int layoutCount = cJSON_GetArraySize(layouts);
     std::string layoutId;
     const bool haveId = jsonString(cJSON_GetArrayItem(layouts, 0), "id", layoutId);
     cJSON_Delete(layouts);
+    if (layoutCount > 1) {
+        ESP_LOGW(TAG, "Orchestrator has %d layouts; using the first (%s)", layoutCount,
+                 layoutId.c_str());
+    }
     if (!haveId || layoutId.empty()) {
         ESP_LOGE(TAG, "Refusing layout list: first entry has no id");
         return std::string();
@@ -898,19 +1010,12 @@ void OrchestratorClient::handleSystemStatus(const void* payloadPtr)
         reason = reasonItem->valuestring;
     }
 
-    SystemStatusCallback callback;
-    if (lockState(pdMS_TO_TICKS(50))) {
-        m_systemStatus = status;
-        callback = m_systemStatusCallback;
-        unlockState();
-    }
+    m_systemStatus = status;
 
     ESP_LOGI(TAG, "System status: %s%s%s", statusWire.c_str(),
              reason.empty() ? "" : " -- ", reason.c_str());
 
-    if (callback) {
-        callback(status, reason);
-    }
+    m_systemStatusCallback(status, reason);
 }
 
 #if CONFIG_THROTTLE_TESTS
@@ -924,13 +1029,28 @@ void OrchestratorClient::testHandleMessage(const std::string& json)
 
 esp_err_t OrchestratorClient::sendJson(const std::string& json)
 {
-    if (!m_client || !isConnected()) {
+    // Checked first, without the handle mutex: while a re-login is under way
+    // the link is down, so senders leave here rather than queue behind it.
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to the orchestrator");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!m_clientMutex ||
+        xSemaphoreTake(m_clientMutex, pdMS_TO_TICKS(CLIENT_LOCK_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Socket handle busy; frame not sent");
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_websocket_client_handle_t client = m_client;
+    if (!client) {
+        xSemaphoreGive(m_clientMutex);
         ESP_LOGW(TAG, "Not connected to the orchestrator");
         return ESP_ERR_INVALID_STATE;
     }
 
     const int sent = esp_websocket_client_send_text(
-        m_client, json.c_str(), static_cast<int>(json.size()), pdMS_TO_TICKS(1000));
+        client, json.c_str(), static_cast<int>(json.size()), pdMS_TO_TICKS(1000));
+    xSemaphoreGive(m_clientMutex);
 
     if (sent < 0) {
         ESP_LOGE(TAG, "Failed to send frame");
@@ -1009,8 +1129,8 @@ esp_err_t OrchestratorClient::sendFunctionCommand(int locoAddress, int function,
 
 esp_err_t OrchestratorClient::sendEmergencyStop()
 {
-    // No payload by contract. Sent even when the link looks unhealthy -- the
-    // one command where trying and failing beats not trying.
+    // No payload by contract. With the socket down there is nothing to send
+    // it on; the caller reports that, and must not show the layout as stopped.
     ESP_LOGW(TAG, "Sending EMERGENCY_STOP");
     return sendJson("{\"type\":\"EMERGENCY_STOP\"}");
 }
@@ -1039,86 +1159,65 @@ esp_err_t OrchestratorClient::refreshRoster()
 
     // The control plane carries loco state keyed by address but no names, so
     // the roster is a REST read. It needs a layout id, which getLayoutId()
-    // fetches once and caches -- the power POST needs the same id.
+    // fetches once per login and caches -- the power POST needs the same id.
     const std::string layoutId = getLayoutId();
     if (layoutId.empty()) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
-    esp_http_client_handle_t client = nullptr;
-    esp_err_t err = ESP_OK;
-    int status = 0;
-
-    HttpCapture locosCapture;
+    // Streamed: each record is parsed as it arrives, so the roster is bounded
+    // by MAX_ROSTER_ENTRIES rather than by a response buffer (F-35).
+    RosterStream stream;
     const std::string locosUrl = base + "/api/layouts/" + layoutId + "/locos";
     esp_http_client_config_t locosCfg = {};
     locosCfg.url = locosUrl.c_str();
     locosCfg.method = HTTP_METHOD_GET;
     locosCfg.timeout_ms = HTTP_TIMEOUT_MS;
-    locosCfg.event_handler = httpEventHandler;
-    locosCfg.user_data = &locosCapture;
+    locosCfg.event_handler = rosterEventHandler;
+    locosCfg.user_data = &stream;
 
-    client = esp_http_client_init(&locosCfg);
+    esp_http_client_handle_t client = esp_http_client_init(&locosCfg);
     if (!client) {
         return ESP_FAIL;
     }
     esp_http_client_set_header(client, "Cookie", cookie.c_str());
-    err = esp_http_client_perform(client);
-    status = esp_http_client_get_status_code(client);
+    const esp_err_t err = esp_http_client_perform(client);
+    const int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK || status != 200) {
         ESP_LOGE(TAG, "Failed to fetch roster (HTTP %d)", status);
         return (err != ESP_OK) ? err : ESP_FAIL;
     }
-    if (locosCapture.truncated) {
-        ESP_LOGE(TAG, "Refusing truncated roster response");
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    cJSON* locos = cJSON_Parse(locosCapture.body.c_str());
-    if (!cJSON_IsArray(locos)) {
-        ESP_LOGE(TAG, "Refusing roster: not an array");
-        if (locos) cJSON_Delete(locos);
+    // A record cJSON could not parse, or a stream that is not an array or
+    // stops short of its closing bracket: refused whole, never half-applied.
+    if (stream.splitter.failed() || !stream.splitter.complete()) {
+        ESP_LOGE(TAG, "Refusing roster: %s",
+                 stream.splitter.failed() ? "malformed" : "truncated");
         return ESP_ERR_INVALID_RESPONSE;
+    }
+    if (stream.splitter.oversizedElements() > 0) {
+        ESP_LOGW(TAG, "Skipped %u roster records over %u bytes",
+                 static_cast<unsigned>(stream.splitter.oversizedElements()),
+                 static_cast<unsigned>(MAX_ROSTER_RECORD_BYTES));
+    }
+    if (stream.dropped > 0) {
+        ESP_LOGW(TAG, "Roster has %u more locos than the %u kept",
+                 static_cast<unsigned>(stream.dropped),
+                 static_cast<unsigned>(MAX_ROSTER_ENTRIES));
     }
 
     // Built aside and swapped in, so a partly-built roster is never visible to
     // the carousel.
-    std::vector<RosterEntry> roster;
-    const cJSON* item = nullptr;
-    cJSON_ArrayForEach(item, locos) {
-        RosterEntry entry;
-        if (!jsonInt(item, "address", entry.address) || entry.address <= 0) {
-            continue;
-        }
-        if (!jsonString(item, "name", entry.name) || entry.name.empty()) {
-            entry.name = "Loco " + std::to_string(entry.address);
-        }
-        roster.push_back(entry);
-    }
-    cJSON_Delete(locos);
-
-    RosterCallback callback;
-    if (lockState(pdMS_TO_TICKS(200))) {
-        m_roster.swap(roster);
-        callback = m_rosterCallback;
-        unlockState();
-    } else {
+    if (!lockState(pdMS_TO_TICKS(200))) {
         ESP_LOGW(TAG, "Could not lock to publish roster");
         return ESP_ERR_TIMEOUT;
     }
+    m_roster = stream.roster;
+    unlockState();
 
-    ESP_LOGI(TAG, "Roster loaded: %u locomotives", static_cast<unsigned>(getRosterSize()));
-
-    if (callback) {
-        std::vector<RosterEntry> copy;
-        if (lockState(pdMS_TO_TICKS(100))) {
-            copy = m_roster;
-            unlockState();
-        }
-        callback(copy);
-    }
+    ESP_LOGI(TAG, "Roster loaded: %u locomotives", static_cast<unsigned>(stream.roster.size()));
+    m_rosterCallback(stream.roster);
     return ESP_OK;
 }
 
@@ -1145,48 +1244,110 @@ bool OrchestratorClient::getRosterEntry(int index, RosterEntry& outEntry) const
     return found;
 }
 
+// --- Last reported loco state ----------------------------------------------
+
+void OrchestratorClient::cacheLocoState(const LocoState& state)
+{
+    CachedLocoState cached;
+    cached.speed = state.speed;
+    cached.direction = state.direction;
+    for (const auto& fn : state.functions) {
+        // The parser admits F0-F28 only; checked again because a shift past
+        // 31 is undefined.
+        if (fn.first < 0 || fn.first > 28) {
+            continue;
+        }
+        const uint32_t bit = 1u << fn.first;
+        cached.functionsKnown |= bit;
+        if (fn.second) {
+            cached.functionsOn |= bit;
+        }
+    }
+
+    if (!lockState(pdMS_TO_TICKS(50))) {
+        ESP_LOGW(TAG, "Could not lock to cache state for loco %d", state.address);
+        return;
+    }
+    auto it = m_locoStates.find(state.address);
+    if (it != m_locoStates.end()) {
+        it->second = cached;
+    } else if (m_locoStates.size() < MAX_CACHED_LOCOS) {
+        m_locoStates.emplace(state.address, cached);
+    } else {
+        ESP_LOGW(TAG, "Loco state cache full; not caching loco %d", state.address);
+    }
+    unlockState();
+}
+
+void OrchestratorClient::clearLocoStates()
+{
+    if (lockState(pdMS_TO_TICKS(200))) {
+        m_locoStates.clear();
+        unlockState();
+    } else {
+        ESP_LOGW(TAG, "Could not lock to clear the loco state cache");
+    }
+}
+
+bool OrchestratorClient::getLastLocoState(int address, LocoState& outState) const
+{
+    CachedLocoState cached;
+    bool found = false;
+    if (lockState(pdMS_TO_TICKS(50))) {
+        auto it = m_locoStates.find(address);
+        if (it != m_locoStates.end()) {
+            cached = it->second;
+            found = true;
+        }
+        unlockState();
+    }
+    if (!found) {
+        return false;
+    }
+
+    outState = LocoState{};
+    outState.address = address;
+    outState.speed = cached.speed;
+    outState.direction = cached.direction;
+    for (int fn = 0; fn <= 28; ++fn) {
+        const uint32_t bit = 1u << fn;
+        if (cached.functionsKnown & bit) {
+            outState.functions[fn] = (cached.functionsOn & bit) != 0;
+        }
+    }
+    return true;
+}
+
 // --- Callbacks -------------------------------------------------------------
 
 void OrchestratorClient::setConnectionStateCallback(ConnectionStateCallback callback)
 {
-    if (lockState(pdMS_TO_TICKS(100))) {
-        m_connectionCallback = std::move(callback);
-        unlockState();
-    }
+    m_connectionCallback.set(std::move(callback));
 }
 
 void OrchestratorClient::setLocoStateCallback(LocoStateCallback callback)
 {
-    if (lockState(pdMS_TO_TICKS(100))) {
-        m_locoStateCallback = std::move(callback);
-        unlockState();
-    }
+    m_locoStateCallback.set(std::move(callback));
 }
 
 void OrchestratorClient::setSystemStatusCallback(SystemStatusCallback callback)
 {
-    if (lockState(pdMS_TO_TICKS(100))) {
-        m_systemStatusCallback = std::move(callback);
-        unlockState();
-    }
+    m_systemStatusCallback.set(std::move(callback));
 }
 
 void OrchestratorClient::setRosterCallback(RosterCallback callback)
 {
-    if (lockState(pdMS_TO_TICKS(100))) {
-        m_rosterCallback = std::move(callback);
-        unlockState();
-    }
+    m_rosterCallback.set(std::move(callback));
+}
+
+void OrchestratorClient::setCommandRefusedCallback(CommandRefusedCallback callback)
+{
+    m_commandRefusedCallback.set(std::move(callback));
 }
 
 void OrchestratorClient::setTrackPowerCallback(TrackPowerCallback callback)
 {
-    if (lockState(pdMS_TO_TICKS(100))) {
-        m_trackPowerCallback = std::move(callback);
-        unlockState();
-    } else {
-        m_trackPowerCallback = std::move(callback);
-    }
+    m_trackPowerCallback.set(std::move(callback));
 }
 
 const char* OrchestratorClient::stateName(ConnectionState state)
