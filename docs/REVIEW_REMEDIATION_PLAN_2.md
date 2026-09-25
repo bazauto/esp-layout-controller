@@ -47,7 +47,7 @@ freeze while one is moving.
 | F-40 | [WiFi credential save and reboot-on-error](#f-40-wifi-credential-save-and-reboot-on-error) | LOW | Small | 3 | Code done | #43 |
 | F-41 | [Seesaw read timing](#f-41-seesaw-read-timing) | LOW | Small | 5 | Code done | #44 |
 | F-42 | [Protocol hygiene odds and ends](#f-42-protocol-hygiene-odds-and-ends) | LOW | Small | 5 | Code done | #45 |
-| F-43 | [CI hardening](#f-43-ci-hardening) | LOW | Small | 5 | Code done | #46 |
+| F-43 | [CI hardening](#f-43-ci-hardening) | LOW | Small | 5 | Done | #46 |
 | F-44 | [Threading-model task table drift](#f-44-threading-model-task-table-drift) | LOW | Small | 5 | Code done | #47 |
 
 **Status key:** *Open* — not started. *Code done* — implemented and compiled, bench criteria
@@ -852,7 +852,8 @@ No `permissions:` block, actions pinned by tag rather than SHA, and
       to be a branch; it is pinned at the head `@v1` was running.
 - [x] `esp_websocket_client` is `~1.8.0`, and `dependencies.lock`'s `manifest_hash` is
       recomputed to match, so CI does not re-solve.
-- [ ] CI passes on the PR with the pins.
+- [x] CI passes on the PR with the pins (`bf65c15`). The log shows the three pinned commits
+      downloaded, and the component manager taking the lock as it is, with no re-solve.
 - Pinned actions no longer update themselves. Dependabot's `github-actions` ecosystem would
   raise the bumps, if wanted.
 
