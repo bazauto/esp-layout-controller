@@ -26,8 +26,9 @@ main/
   ├── hardware/       # HAL (encoders, I2C)
   ├── communication/  # ThrottleBackend port + transports (WiThrottle; orchestrator WebSocket)
   ├── model/          # Data (Loco, Throttle, Knob)
-  ├── controller/     # Business logic
-  └── ui/             # LVGL screens; colours from UiTheme.h, never raw hex
+  ├── controller/     # Business logic; SettingsWriter takes the UI's NVS writes
+  ├── ui/             # LVGL screens; colours from UiTheme.h, never raw hex
+  └── utils/          # CallbackSlot for any callback set on one task and called on another
 ```
 
 ### Class Structure

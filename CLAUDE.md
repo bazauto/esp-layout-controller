@@ -92,10 +92,12 @@ main/
 ├── communication/  ThrottleBackend (port), WiThrottleBackend, OrchestratorBackend,
 │                   WiFiManager, WiThrottleClient (TCP), JmriJsonClient (WebSocket),
 │                   OrchestratorClient (WebSocket control plane)
-├── controller/     AppController, ThrottleController, WiFiController, JmriConnectionController
-└── ui/             SettingsScreen (transport choice, device settings, status),
-                    JmriConfigScreen and OrchestratorConfigScreen (one per
-                    transport), MainScreen, components
+├── controller/     AppController, ThrottleController, WiFiController, JmriConnectionController,
+│                   SettingsWriter (the UI's NVS writes, off the LVGL task)
+├── ui/             SettingsScreen (transport choice, device settings, status),
+│                   JmriConfigScreen and OrchestratorConfigScreen (one per
+│                   transport), MainScreen, components
+└── utils/          CallbackSlot (cross-task callbacks), StackReport (diagnostics)
 ```
 
 Dependency direction is one way: `ui` → `controller` → `communication` / `model`. A model
@@ -220,3 +222,9 @@ Things that look like bugs or oversights and are not. One line each.
   orchestrator's `locos` table stores no labels, so a WebSocket-connected device would show
   `F0`…`F28`. Being fixed orchestrator-side: labels become operator-authored per loco.
 - **No OTA.** See the flash budget above.
+- **The orchestrator link is cleartext, and whether to keep it so is undecided (F-36).**
+  The login, the 30-day session cookie and the control plane all cross the layout WiFi in
+  the clear. WiThrottle is no better: it has no authentication at all. TLS costs almost no
+  flash, because `esp_websocket_client` already links mbedTLS, but it does cost heap per
+  connection, and the orchestrator would have to serve it. The measured figures and the
+  options are in `docs/REVIEW_REMEDIATION_PLAN_2.md`.

@@ -1,7 +1,7 @@
 # Review Remediation Plan — Second Pass
 
 **Created:** 2026-09-24
-**Status:** In progress — Batches 1–4 code done (every HIGH and the operator-facing MEDIUMs), awaiting their bench cycles
+**Status:** In progress — code done for every finding (Batches 1–5), awaiting the bench cycles; F-33's measurements and F-36's decision are still open
 **Source:** Static review of the whole firmware (`main/`, build config, CI), with the
 orchestrator-facing behaviour checked against `bazauto/layout-orchestration`. Nothing was
 flashed during the review: every "bench" criterion below is unverified until someone runs it
@@ -34,21 +34,21 @@ freeze while one is moving.
 | F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Code done | #30 |
 | F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Code done | #31 |
 | F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Code done (docs only; no bench check) | #32 |
-| F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Slots: code done; sync: open | #33 |
+| F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Code done | #33 |
 | F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Code done | #34 |
 | F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done | #35 |
-| F-33 | [Task stack headroom unmeasured](#f-33-task-stack-headroom-unmeasured) | MEDIUM | Small | 5 | Open | #36 |
+| F-33 | [Task stack headroom unmeasured](#f-33-task-stack-headroom-unmeasured) | MEDIUM | Small | 5 | Instrumented; measurements open | #36 |
 | F-34 | [JMRI config screen connect/disconnect faults](#f-34-jmri-config-screen-connectdisconnect-faults) | MEDIUM | Medium | 3 | Code done | #37 |
-| F-35 | [Orchestrator roster refused above ~35 locos](#f-35-orchestrator-roster-refused-above-35-locos) | MEDIUM | Small | 5 | Open | #38 |
-| F-36 | [Operator credential and session cookie in cleartext](#f-36-operator-credential-and-session-cookie-in-cleartext) | MEDIUM | Small (decision) | 5 | Open | #39 |
-| F-37 | [WiThrottle updates unvalidated](#f-37-withrottle-updates-unvalidated) | LOW | Small | 5 | Open | #40 |
-| F-38 | [Hot-path logging and repaint cost](#f-38-hot-path-logging-and-repaint-cost) | LOW | Small | 5 | Open | #41 |
-| F-39 | [NVS writes on the LVGL task](#f-39-nvs-writes-on-the-lvgl-task) | LOW | Small | 5 | JMRI settings: done (batch 3); rest: open | #42 |
+| F-35 | [Orchestrator roster refused above ~35 locos](#f-35-orchestrator-roster-refused-above-35-locos) | MEDIUM | Small | 5 | Code done | #38 |
+| F-36 | [Operator credential and session cookie in cleartext](#f-36-operator-credential-and-session-cookie-in-cleartext) | MEDIUM | Small (decision) | 5 | Facts recorded; decision open | #39 |
+| F-37 | [WiThrottle updates unvalidated](#f-37-withrottle-updates-unvalidated) | LOW | Small | 5 | Code done | #40 |
+| F-38 | [Hot-path logging and repaint cost](#f-38-hot-path-logging-and-repaint-cost) | LOW | Small | 5 | Code done | #41 |
+| F-39 | [NVS writes on the LVGL task](#f-39-nvs-writes-on-the-lvgl-task) | LOW | Small | 5 | Code done | #42 |
 | F-40 | [WiFi credential save and reboot-on-error](#f-40-wifi-credential-save-and-reboot-on-error) | LOW | Small | 3 | Code done | #43 |
-| F-41 | [Seesaw read timing](#f-41-seesaw-read-timing) | LOW | Small | 5 | Open | #44 |
-| F-42 | [Protocol hygiene odds and ends](#f-42-protocol-hygiene-odds-and-ends) | LOW | Small | 5 | Open | #45 |
-| F-43 | [CI hardening](#f-43-ci-hardening) | LOW | Small | 5 | Open | #46 |
-| F-44 | [Threading-model task table drift](#f-44-threading-model-task-table-drift) | LOW | Small | 5 | Open | #47 |
+| F-41 | [Seesaw read timing](#f-41-seesaw-read-timing) | LOW | Small | 5 | Code done | #44 |
+| F-42 | [Protocol hygiene odds and ends](#f-42-protocol-hygiene-odds-and-ends) | LOW | Small | 5 | Code done | #45 |
+| F-43 | [CI hardening](#f-43-ci-hardening) | LOW | Small | 5 | Code done | #46 |
+| F-44 | [Threading-model task table drift](#f-44-threading-model-task-table-drift) | LOW | Small | 5 | Code done | #47 |
 
 **Status key:** *Open* — not started. *Code done* — implemented and compiled, bench criteria
 still unticked. *Done* — bench criteria confirmed on the board.
@@ -515,6 +515,17 @@ the pattern to follow.
 1. Batch 1: stop the UI taking backend-owned slots (see F-21).
 2. Batch 5: copy-under-lock for every remaining slot.
 
+#### Acceptance Criteria
+
+- [x] No UI class takes a client's connection slot (batch 1).
+- [x] Every slot on `WiThrottleClient`, `JmriJsonClient`, `WiFiManager`, `OrchestratorClient`,
+      both backends and `ThrottleController` is a `CallbackSlot` (`main/utils/CallbackSlot.h`):
+      set under its own lock, invoked as a copy with the lock released. The controller's
+      function-pointer-and-`userData` pairs are one closure each, so they cannot tear.
+- [x] `OrchestratorClient`'s lock-timeout fallbacks that read a slot unlocked are gone with the
+      slots they read.
+- [ ] Unit test `test_callback_slot_invokes_a_copy` passes on the board (it compiles).
+
 ---
 
 ### F-31: JMRI heartbeat task deleted from outside
@@ -582,6 +593,15 @@ on their own stacks; the receive task also ran `JmriJsonClient::connect` from th
 Log `uxTaskGetStackHighWaterMark` for every application task on the bench under load, record
 the results in `THREADING_MODEL.md`, and resize with a margin.
 
+#### Acceptance Criteria
+
+- [x] `CONFIG_THROTTLE_STACK_REPORT` (menuconfig → Diagnostics, off by default) logs every
+      application task's high-water mark every 10 s, and the one-shot tasks log theirs as
+      they exit. Compiled out when off; the option builds.
+- [x] `THREADING_MODEL.md` has a table for the measurements and the procedure.
+- [ ] Bench: build with the option on, drive under load, fill in the table, and resize any
+      task left with less than about a quarter of its stack. Nothing was resized blind.
+
 ---
 
 ### F-34: JMRI config screen connect/disconnect faults
@@ -613,7 +633,8 @@ the saved settings, the auto-reconnect flag and the one task that connects.
 - [x] The `PW` callback is registered once, before any connect, and only records the port;
       the worker saves it as `json_port` and moves the JSON client.
 - [x] A manual connect updates the settings the worker reconnects to.
-- [x] Under the orchestrator, Connect saves only (one-shot `jmri_save` task).
+- [x] Under the orchestrator, Connect saves only (a one-shot `jmri_save` task; the shared
+      `SettingsWriter` since batch 5, F-39).
 - [ ] Bench: Connect, Disconnect (stays down past ten seconds), Connect again; change server
       address and confirm reconnects go to the new one.
 
@@ -633,6 +654,18 @@ fields). A truncated response is refused whole, so a larger roster leaves nothin
 Raise the limit for the roster read (allocating from PSRAM), or parse incrementally keeping
 only address and name.
 
+#### Acceptance Criteria
+
+- [x] The roster is streamed. `JsonArraySplitter` hands each record over as it closes, and each
+      is parsed alone with cJSON, so memory is bounded by one record (4 KB cap) rather than
+      by the response.
+- [x] A record over the cap, or with no usable address, costs that loco only. A record cJSON
+      refuses, a stream that is not an array of objects, or one cut short, refuses the whole
+      roster, as before.
+- [x] At most 128 locos are kept, matching the loco state cache, with a warning past that.
+- [ ] Unit tests `test_roster_splitter_*` (seven) pass on the board (they compile).
+- [ ] Bench: a roster of more than 35 locos loads whole.
+
 ---
 
 ### F-36: Operator credential and session cookie in cleartext
@@ -651,6 +684,31 @@ records a decision about cleartext on the wire.
 Record the decision in CLAUDE.md's transport section. If TLS is wanted, size it with
 `idf.py size` first against the flash budget.
 
+#### What batch 5 measured
+
+- **Flash is not the obstacle.** The image already carries mbedTLS: `libmbedcrypto` 79 KB,
+  `libmbedtls` 30 KB and `libmbedx509` 9 KB, pulled in by `esp_websocket_client`'s SSL
+  transport and `esp_http_client`. A build with `CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=n` was
+  only 528 bytes smaller, because the WebSocket client links it anyway. So `https`/`wss`
+  would add little beyond a CA or pinned certificate — and, conversely, staying cleartext
+  gives none of that flash back.
+- **Heap is the device-side cost.** With this build's mbedTLS settings (16 KB input record
+  buffer, dynamic buffers off), each open TLS connection holds roughly 20–40 KB of heap. The
+  socket is always open, and a power or roster request briefly adds a second connection.
+- **The orchestrator has to serve it.** On a LAN host that means a reverse proxy or its own
+  certificate, and the device then needs that certificate's CA, or a pin, in flash or NVS.
+- **Cleartext is the status quo on both transports.** WiThrottle has no authentication at all:
+  anyone on the layout WiFi can drive through JMRI. That puts the real boundary at the WiFi
+  password. Under that model, the orchestrator cookie's 30-day sliding lifetime is the part
+  that widens the exposure.
+
+#### Acceptance Criteria
+
+- [x] The facts above are recorded, and CLAUDE.md's Open limits names the question.
+- [ ] **Decision (owner):** accept cleartext on the layout WiFi as the boundary, as F-18
+      did for NVS; or shorten the operator session lifetime orchestrator-side; or add TLS
+      on both ends. Record the outcome in CLAUDE.md's transport section.
+
 ---
 
 ### F-37: WiThrottle updates unvalidated
@@ -661,6 +719,15 @@ Record the decision in CLAUDE.md's transport section. If TLS is wanted, size it 
   so a late reply for the previous loco can set the wrong baseline.
 - Function numbers from the server are unbounded, so `Throttle::setFunctionState` and the
   function panel grow without limit.
+
+#### Acceptance Criteria
+
+- [x] `ThrottleController` applies a transport report only if it names the loco the
+      throttle holds (address 0 meaning "not said"). The check sits in the controller, so it
+      covers both transports.
+- [x] Speeds above 126 and function numbers above 28 are dropped.
+- [ ] Unit tests `test_controller_ignores_update_for_other_loco` and
+      `test_controller_bounds_reported_speed_and_function` pass on the board (they compile).
 
 ---
 
@@ -673,6 +740,14 @@ Record the decision in CLAUDE.md's transport section. If TLS is wanted, size it 
 - `PowerStatusBar::refresh()` runs four times per repaint, and labels are rewritten (and so
   invalidated) even when unchanged.
 
+#### Acceptance Criteria
+
+- [x] Per-line, per-tick and per-update logs are DEBUG: WiThrottle `RX`, direction commands,
+      the controller's knob and update lines, the virtual encoder.
+- [x] `PowerStatusBar::refresh()` runs once per repaint, and it and the knob indicators skip
+      any widget whose look has not changed. (`ThrottleMeter` already did for its labels.)
+- [ ] Bench: spin a knob hard with the console attached; the display keeps up.
+
 ---
 
 ### F-39: NVS writes on the LVGL task
@@ -683,8 +758,21 @@ Record the decision in CLAUDE.md's transport section. If TLS is wanted, size it 
 write NVS from event handlers, against F-05's rule.
 
 **Progress:** the JMRI settings are now saved by `JmriConnectionController` on its own task
-(batch 3, F-34). The orchestrator screen's save, `saveSpeedSteps`, and the WiFi screen's
-Forget remain.
+(batch 3, F-34). Batch 5 moved the rest.
+
+#### Acceptance Criteria
+
+- [x] `SettingsWriter` — one task, `settings_writer`, and a queue — carries out every NVS
+      write the UI asks for, in order: speed steps, the transport choice, the orchestrator
+      settings, WiFi Forget, and the JMRI settings under the orchestrator (replacing the
+      one-shot `jmri_save` task).
+- [x] The `orch` read-modify-writes happen on the writer, so a transport change and an
+      orchestrator Save moments apart cannot overwrite each other with stale copies (the
+      transport choice's own save was a fourth NVS write on the LVGL task, not listed above).
+- [x] The orchestrator screen's Connect posts the supervisor's wake-up behind its save, so
+      the login reads what was just typed.
+- [ ] Bench: change speed steps and leave the screen at once; the new value applies. Save
+      orchestrator settings, then Connect; the login uses them. Forget WiFi.
 
 ---
 
@@ -713,6 +801,15 @@ The double read compensates for a missing write → delay → read sequence (the
 to prepare a response). Rotation during the 5 ms between reads is lost. Split each transaction
 into a write, a short delay and a read, and drop the double read — bench-verify before merging.
 
+#### Acceptance Criteria
+
+- [x] Every Seesaw read is a write, a 500 µs wait (Adafruit's library uses 250 µs), and a
+      read, each its own transaction. Every register is read once.
+- [ ] **Bench, before merging:** slow single clicks each register exactly one step, a fast
+      spin tracks without lost steps, and the button still presses and releases. If reads
+      fail or return garbage, the F-19 bound drops them, so the knob stays still rather than
+      jumping.
+
 ---
 
 ### F-42: Protocol hygiene odds and ends
@@ -726,6 +823,18 @@ into a write, a short delay and a read, and drop the double read — bench-verif
 - `getLayoutId` always uses the first layout and is not cleared when the host changes.
 - `handleRosterMessage`'s warning can read past the end of a malformed message.
 
+#### Acceptance Criteria
+
+- [x] `requestPowerList` removed.
+- [x] `OrchestratorClient`: connection, system and track-power states are atomics, so no lock
+      timeout can lose a change. The session cookie, host and port are written only under
+      the lock; a timeout fails the login rather than writing unlocked.
+- [x] A message split across frames is reassembled up to FIN before it is parsed.
+- [x] The layout id is forgotten on every login, and more than one layout is logged.
+- [x] `JmriJsonClient`'s power-manager name, written on two tasks and read on a third, is
+      under the power mutex.
+- [x] The roster warning no longer indexes past the end.
+
 ---
 
 ### F-43: CI hardening
@@ -734,6 +843,18 @@ into a write, a short delay and a read, and drop the double read — bench-verif
 
 No `permissions:` block, actions pinned by tag rather than SHA, and
 `espressif/esp_websocket_client: '*'` in the manifest (the lock file pins it).
+
+#### Acceptance Criteria
+
+- [x] `permissions: contents: read` at the top of `ci.yml`.
+- [x] `actions/checkout`, `espressif/esp-idf-ci-action` and `actions/upload-artifact` are
+      pinned by commit, each with its release in a comment. `esp-idf-ci-action@v1` turned out
+      to be a branch; it is pinned at the head `@v1` was running.
+- [x] `esp_websocket_client` is `~1.8.0`, and `dependencies.lock`'s `manifest_hash` is
+      recomputed to match, so CI does not re-solve.
+- [ ] CI passes on the PR with the pins.
+- Pinned actions no longer update themselves. Dependabot's `github-actions` ecosystem would
+  raise the bumps, if wanted.
 
 ---
 
@@ -744,3 +865,10 @@ No `permissions:` block, actions pinned by tag rather than SHA, and
 `THREADING_MODEL.md`'s table is missing `wifi_scan` (4 KB), and will need the measured figures
 from F-33. (It was also missing `jmri_connect`; batch 3 removed that task, folding it into
 `jmri_conn`, which the table now lists.)
+
+#### Acceptance Criteria
+
+- [x] The table lists `wifi_scan`, `settings_writer` and `stack_report`, both WebSocket tasks
+      with their sizes, and the IDF tasks our callbacks run on. `jmri_save` is gone, and the
+      LVGL task carries its real name, `lvgl`.
+- [ ] The measured column is filled in (F-33).
