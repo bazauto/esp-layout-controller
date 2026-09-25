@@ -41,6 +41,9 @@ public:
     /** State arrives unprompted as LOCO_STATE, so no polling task is created. */
     bool requiresPolling() const override { return false; }
 
+    /** FUNCTION_COMMAND sets the function's state outright (F-28). */
+    bool functionCommandIsButtonEvent() const override { return false; }
+
     bool isConnected() const override;
     ConnectionState getState() const override;
 
@@ -51,6 +54,9 @@ public:
     esp_err_t setSpeedAndDirection(int throttleId, int speed, bool forward) override;
     esp_err_t setFunction(int throttleId, int function, bool state) override;
     esp_err_t refreshThrottleState(int throttleId) override;
+
+    /** EMERGENCY_STOP: halts the whole layout, not just this device's locos. */
+    esp_err_t emergencyStop() override;
 
     size_t getRosterSize() const override;
     bool getRosterEntry(int index, RosterEntry& outEntry) const override;
@@ -87,6 +93,15 @@ private:
 
     /** Routes an incoming LocoState to whichever throttles hold that address. */
     void onLocoState(const OrchestratorClient::LocoState& state);
+
+    /**
+     * @brief Puts every throttle back to what the layout last reported.
+     *
+     * Called on an ERROR frame. The orchestrator does not say which command it
+     * refused, and the controller has already shown what was asked for, so the
+     * display is re-seeded from the layout's own state (F-25).
+     */
+    void onCommandRefused();
 
     /**
      * @brief Applies a LocoState to one throttle: shadow first, then display.

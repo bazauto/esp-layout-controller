@@ -38,6 +38,9 @@ public:
     bool providesFunctionLabels() const override { return true; }
     bool requiresPolling() const override { return true; }
 
+    /** JMRI applies each function's latching setting to a press and release. */
+    bool functionCommandIsButtonEvent() const override { return true; }
+
     bool isConnected() const override;
     ConnectionState getState() const override;
 
@@ -47,6 +50,7 @@ public:
     esp_err_t setDirection(int throttleId, bool forward) override;
     esp_err_t setFunction(int throttleId, int function, bool state) override;
     esp_err_t refreshThrottleState(int throttleId) override;
+    esp_err_t emergencyStop() override;
 
     size_t getRosterSize() const override;
     bool getRosterEntry(int index, RosterEntry& outEntry) const override;

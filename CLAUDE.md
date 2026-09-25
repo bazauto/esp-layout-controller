@@ -69,9 +69,11 @@ skipped (speed, direction — the next one will land), `-1` only for critical on
 updates. F-14 removed an infinite lock from a frequently-called path; do not reintroduce
 that shape.
 
-**3. Lock ordering is fixed: `m_stateMutex` before `lvgl_port_lock`, never the reverse.**
-`ThrottleController` guards its own state with a mutex separate from the LVGL port lock.
-Taking them in the other order deadlocks.
+**3. Lock ordering is fixed: `lvgl_port_lock` before `m_stateMutex`, never the reverse.**
+`ThrottleController` guards its own state with a mutex separate from the LVGL port lock. The
+UI takes the LVGL lock and then reads the controller — every event handler, every repaint —
+so the controller must never call out to the UI (`updateUI()`, the power callback) while
+holding its mutex. Documented the other way round until F-29.
 
 **4. State lives at the application layer, never in the UI.** `AppController` owns the
 clients and `ThrottleController`; `ThrottleController` owns the `Throttle` / `Knob` /
@@ -196,8 +198,9 @@ Things that look like bugs or oversights and are not. One line each.
   (F-18), not an oversight.
 - **`json_port` is normally discovered from the WiThrottle `PW` message**, not configured,
   which is why it has a default and no prominent UI field.
-- **K1/K2 are disabled while WiThrottle is disconnected** (472a955) — a knob that still
-  turned would move a model that no longer tracks anything real.
+- **K1/K2 are disabled while the transport is disconnected** (472a955, F-25) — a knob that
+  still turned would move a model that no longer tracks anything real. Enforced in
+  `ThrottleController`, because the physical encoders never pass through the UI.
 - **`sdkconfig.tests` is tracked despite appearing in `.gitignore`** — it predates the
   ignore rule. `sdkconfig.test.defaults` is the file that actually matters.
 - **`CONFIG_WS_BUFFER_SIZE=16384` is not oversizing.** It sizes the WebSocket *handshake*

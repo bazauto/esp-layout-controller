@@ -81,7 +81,8 @@ the bottom. Every screen follows it.
 | `onReleaseButtonClicked` | "Release" button | `TC::onThrottleRelease()` |
 | `onVirtualEncoderRotation` | Virtual encoder ±buttons | `TC::onKnobRotation()` |
 | `onVirtualEncoderPress` | Virtual encoder press | `TC::onKnobPress()` |
-| `onFunctionButtonClicked` | Function toggle | `TC::setFunction()` — through the port, not a client |
+| `onFunctionButtonClicked` | Function button press / release | `TC::onFunctionButton()` — reports the button; the controller decides press/release or toggle for the transport (F-28) |
+| `onEmergencyStopPressed` | **E-STOP** (bottom row, on press) | `TC::emergencyStop()` (F-27) |
 | `onSettingsButtonClicked` | Settings gear icon | Navigate to WiFiConfigScreen |
 | `onJmriButtonClicked` | Settings icon | Navigate to SettingsScreen |
 
@@ -193,7 +194,8 @@ did nothing and the label read "Disconnected" while the layout was in fact conne
 
 - A transport answering `supportsTrackPower() == false` gets the button **hidden**, not left
   dead for the operator to press and wonder about.
-- `TrackPower::UNKNOWN` renders as its own state ("Power ?"), not as off.
+- `TrackPower::UNKNOWN` renders as its own state ("Power ?"), not as off — and a press on it
+  turns power **off**, not on. Only a known OFF turns it on (F-27).
 - The press returns immediately: the orchestrator's power command is a blocking HTTP round
   trip, so the write happens on a short-lived task (F-05). The button repaints when the
   layout says power changed, not when we asked.

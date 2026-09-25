@@ -140,6 +140,10 @@ Fired after any state change. `MainScreen` registers this and calls `updateAllTh
 
 All public methods acquire `m_stateMutex` before accessing throttle/knob state. The LVGL port lock is **not** acquired inside `ThrottleController` — that's the UI's responsibility.
 
+The order is `lvgl_port_lock`, then `m_stateMutex`: the UI reads the controller while holding the LVGL lock, so the controller always releases its mutex before it sends a command or calls the UI (F-29).
+
+Knob input is refused in the controller while the backend reports the link down, because the physical encoders call `onKnobRotation` / `onKnobPress` directly (F-25). A speed or stop command that fails is rolled back in the model, unless a transport report has landed since.
+
 ### Polling Task
 
 `throttle_poll` (a FreeRTOS task, 4 KB, priority 3 — not an `esp_timer`) wakes every 10 s and

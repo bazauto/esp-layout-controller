@@ -460,6 +460,42 @@ static void test_orch_snapshot_replaces_cached_state(void)
     TEST_ASSERT_FALSE(client.getLastLocoState(4472, state));
 }
 
+static void test_orch_backend_refusal_reseeds_from_layout_state(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    std::vector<ThrottleBackend::ThrottleUpdate> updates;
+    backend.setThrottleStateCallback(
+        [&updates](const ThrottleBackend::ThrottleUpdate& u) { updates.push_back(u); });
+
+    client.testHandleMessage(SNAPSHOT_WITH_4472_RUNNING);
+    backend.acquireLocomotive(1, 4472, true);
+    updates.clear();
+
+    // An ERROR names no command, but the display may already show what was
+    // asked for. It is put back to what the layout last reported (F-25).
+    client.testHandleMessage(
+        "{\"type\":\"ERROR\",\"payload\":{\"message\":\"Cannot issue command: system is offline\"}}");
+
+    TEST_ASSERT_GREATER_THAN_INT(0, (int)updates.size());
+    TEST_ASSERT_EQUAL_INT(1, updates[0].throttleId);
+    TEST_ASSERT_EQUAL_INT(60, updates[0].speed);
+    TEST_ASSERT_EQUAL_INT(0, updates[0].direction);
+}
+
+static void test_orch_backend_function_commands_are_states(void)
+{
+    OrchestratorClient client;
+    client.initialize();
+    OrchestratorBackend backend(&client);
+
+    // FUNCTION_COMMAND sets the state outright, so the controller must toggle
+    // rather than send press and release (F-28).
+    TEST_ASSERT_FALSE(backend.functionCommandIsButtonEvent());
+}
+
 extern "C" void register_orchestrator_tests(void)
 {
     RUN_TEST(test_orch_cookie_extracted_from_set_cookie);
@@ -486,4 +522,6 @@ extern "C" void register_orchestrator_tests(void)
     RUN_TEST(test_orch_backend_acquire_seeds_from_layout_state);
     RUN_TEST(test_orch_backend_acquire_of_unreported_loco_shows_nothing);
     RUN_TEST(test_orch_snapshot_replaces_cached_state);
+    RUN_TEST(test_orch_backend_refusal_reseeds_from_layout_state);
+    RUN_TEST(test_orch_backend_function_commands_are_states);
 }

@@ -103,11 +103,11 @@ void PowerStatusBar::onTrackPowerClicked(lv_event_t* e)
         return;
     }
 
-    // UNKNOWN turns power on: the useful thing to do when nobody has said what
-    // the rails are doing is to energise them, and the operator can press
-    // again to turn it off once the state is known.
+    // Only a known OFF turns power on. UNKNOWN turns it off: the press may be
+    // a panic, and energising rails nobody has reported on is the wrong way to
+    // fail. A second press, once the state is known, turns it on (F-27).
     const ThrottleBackend::TrackPower current = bar->m_throttleController->getTrackPower();
-    const bool newState = (current != ThrottleBackend::TrackPower::ON);
+    const bool newState = (current == ThrottleBackend::TrackPower::OFF);
 
     ESP_LOGI(TAG, "Toggling track power: %s", newState ? "ON" : "OFF");
 

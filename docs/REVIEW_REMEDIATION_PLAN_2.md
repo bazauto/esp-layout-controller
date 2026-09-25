@@ -1,7 +1,7 @@
 # Review Remediation Plan — Second Pass
 
 **Created:** 2026-09-24
-**Status:** In progress — Batches 1–3 (every HIGH) code done, awaiting their bench cycles
+**Status:** In progress — Batches 1–4 code done (every HIGH and the operator-facing MEDIUMs), awaiting their bench cycles
 **Source:** Static review of the whole firmware (`main/`, build config, CI), with the
 orchestrator-facing behaviour checked against `bazauto/layout-orchestration`. Nothing was
 flashed during the review: every "bench" criterion below is unverified until someone runs it
@@ -29,11 +29,11 @@ freeze while one is moving.
 | F-22 | [WiThrottle reconnect leaks a socket and loses the session](#f-22-withrottle-reconnect-leaks-a-socket-and-loses-the-session) | HIGH | Medium | 2 | Code done | #25 |
 | F-23 | [WiThrottle heartbeat never armed](#f-23-withrottle-heartbeat-never-armed) | HIGH | Small | 2 | Code done | #26 |
 | F-24 | [No automatic recovery after an ordinary outage](#f-24-no-automatic-recovery-after-an-ordinary-outage) | HIGH | Medium | 3 | Code done | #27 |
-| F-25 | [Physical knobs not gated; optimistic update outlives a failed send](#f-25-physical-knobs-not-gated-optimistic-update-outlives-a-failed-send) | MEDIUM | Small | 4 | Open | #28 |
-| F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Concurrent connect removed (batch 3); handle lock: open | #29 |
-| F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Open | #30 |
-| F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Open | #31 |
-| F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Open | #32 |
+| F-25 | [Physical knobs not gated; optimistic update outlives a failed send](#f-25-physical-knobs-not-gated-optimistic-update-outlives-a-failed-send) | MEDIUM | Small | 4 | Code done | #28 |
+| F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Code done | #29 |
+| F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Code done | #30 |
+| F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Code done | #31 |
+| F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Code done | #32 |
 | F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Slots: code done; sync: open | #33 |
 | F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Code done | #34 |
 | F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done | #35 |
@@ -351,8 +351,17 @@ command leaves the display ahead of the loco. The orchestrator refuses manual co
 
 #### Acceptance Criteria
 
-- [ ] A knob turn while disconnected changes nothing.
-- [ ] A refused send leaves the model where it was.
+- [x] A knob turn or press while disconnected changes nothing (`knobInputAllowed`, in the
+      controller, so the physical encoders are covered).
+- [x] A failed send rolls the model back — unless a transport report has landed since.
+- [x] The orchestrator's case is a *refused* command, not a failed send: it answers `ERROR`.
+      `OrchestratorBackend` now re-seeds every assigned throttle from the layout's last
+      reported state on any `ERROR` (the F-20 cache makes that possible).
+- [ ] Unit tests `test_controller_knob_ignored_while_disconnected`,
+      `test_controller_failed_send_rolls_back` and
+      `test_orch_backend_refusal_reseeds_from_layout_state` pass on the board (they compile).
+- [ ] Bench: with the orchestrator `offline`, turn a knob; the display returns to the layout's
+      speed. Pull the WiFi and turn a physical knob; nothing moves on screen.
 
 ---
 
@@ -382,7 +391,11 @@ remains.
 
 #### Acceptance Criteria
 
-- [ ] No path reads `m_client` without the handle mutex.
+- [x] No path reads `m_client` without the handle mutex: sends take it (bounded, and only
+      once the link is known up), `openSocket` publishes under it, and `disconnect()` holds it
+      across stop and destroy.
+- [x] The connecting check need not be atomic any more: the supervisor is the only caller of
+      `connect()` (batch 3).
 - [ ] Bench: press Connect repeatedly while spinning a knob; no crash.
 
 ---
@@ -404,9 +417,24 @@ when that link is down.
 1. Add `emergencyStop()` to the `ThrottleBackend` port (orchestrator: `EMERGENCY_STOP`;
    WiThrottle: `X` on every acquired throttle) and a dedicated on-screen control.
 2. An unknown power state turns power off, not on.
+3. Under WiThrottle, an OFF goes over `PPA0` when the JSON link is down.
 
 **Files:** `ThrottleBackend.h`, both backends, `ThrottleController`, `MainScreen`,
 `PowerStatusBar.cpp`
+
+#### Acceptance Criteria
+
+- [x] `ThrottleBackend::emergencyStop()`; `ThrottleController::emergencyStop()` shows the
+      throttles stopped only once it was sent.
+- [x] An **E-STOP** button in the main screen's bottom row, in `UiTheme::BUTTON_EMERGENCY` —
+      the one saturated button — firing on press rather than on click.
+- [x] A press on an unknown power state turns power off.
+- [x] Under WiThrottle, OFF falls back to `PPA0` when the JSON link is down; ON still waits for
+      it. The button shows WiThrottle's `PPA` state when JSON has none.
+- [ ] Unit test `test_controller_emergency_stop` passes on the board (it compiles).
+- [ ] Bench: E-STOP under each transport; check the button's placement against the carousel
+      and the icon buttons (laid out without a screen to look at).
+- [ ] Bench: stop JMRI's web server, press the power button; power goes off over WiThrottle.
 
 ---
 
@@ -428,6 +456,17 @@ toggles from the known state on press for state-style backends and ignores the r
 
 **Files:** `ThrottleBackend.h`, both backends, `ThrottleController`, `MainScreen.cpp`, tests
 
+#### Acceptance Criteria
+
+- [x] `ThrottleBackend::functionCommandIsButtonEvent()`: true for WiThrottle, false for the
+      orchestrator.
+- [x] The UI reports the button to `ThrottleController::onFunctionButton()`, which toggles on
+      press for a state-style transport and ignores the release.
+- [ ] Unit tests `test_controller_function_press_release_for_event_backend`,
+      `test_controller_function_toggles_for_state_backend` and
+      `test_orch_backend_function_commands_are_states` pass on the board (they compile).
+- [ ] Bench: under the orchestrator, tap F0; the headlight stays on until tapped again.
+
 ---
 
 ### F-29: Documented lock order is the reverse of the code's
@@ -448,6 +487,12 @@ claims to prevent.
 
 Correct CLAUDE.md, `THREADING_MODEL.md` (text and diagram), and any other copy of the rule to
 "LVGL lock before `m_stateMutex`; the controller never calls the UI while holding its mutex".
+
+#### Acceptance Criteria
+
+- [x] CLAUDE.md hard constraint 3, `THREADING_MODEL.md` (text and sequence diagram),
+      `.claude/agents/firmware-review.md` and `CONTROLLER_LAYER.md` all state the order the code
+      uses. No copy of the old rule remains.
 
 ---
 

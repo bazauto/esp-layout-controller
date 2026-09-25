@@ -44,6 +44,10 @@ OrchestratorBackend::OrchestratorBackend(OrchestratorClient* client)
         [this](const OrchestratorClient::LocoState& state) {
             this->onLocoState(state);
         });
+    m_client->setCommandRefusedCallback(
+        [this](const std::string& /*message*/) {
+            this->onCommandRefused();
+        });
 }
 
 OrchestratorBackend::~OrchestratorBackend()
@@ -52,6 +56,7 @@ OrchestratorBackend::~OrchestratorBackend()
     // frame arriving mid-teardown lands in a half-destroyed callback.
     if (m_client) {
         m_client->setLocoStateCallback(nullptr);
+        m_client->setCommandRefusedCallback(nullptr);
         m_client->setConnectionStateCallback(nullptr);
         m_client->setTrackPowerCallback(nullptr);
     }
@@ -275,6 +280,33 @@ esp_err_t OrchestratorBackend::refreshThrottleState(int /*throttleId*/)
     // Nothing to do: the control plane pushes LOCO_STATE unprompted, which is
     // why requiresPolling() is false and this is never called in practice.
     return ESP_OK;
+}
+
+esp_err_t OrchestratorBackend::emergencyStop()
+{
+    if (!m_client) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return m_client->sendEmergencyStop();
+}
+
+void OrchestratorBackend::onCommandRefused()
+{
+    if (!m_client) {
+        return;
+    }
+    const ThrottleStateCallback callback = copyThrottleStateCallback();
+
+    for (int throttleId = 0; throttleId < MAX_THROTTLES; ++throttleId) {
+        const int address = addressFor(throttleId);
+        if (address == 0) {
+            continue;
+        }
+        OrchestratorClient::LocoState known;
+        if (m_client->getLastLocoState(address, known)) {
+            publishToThrottle(throttleId, known, callback);
+        }
+    }
 }
 
 size_t OrchestratorBackend::getRosterSize() const

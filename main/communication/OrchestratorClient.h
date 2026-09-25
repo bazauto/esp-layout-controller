@@ -96,6 +96,8 @@ public:
     using SystemStatusCallback = std::function<void(SystemStatus status, const std::string& reason)>;
     using RosterCallback = std::function<void(const std::vector<RosterEntry>& roster)>;
     using TrackPowerCallback = std::function<void(TrackPower state)>;
+    /** An ERROR frame: the orchestrator refused a command. Not tied to any one. */
+    using CommandRefusedCallback = std::function<void(const std::string& message)>;
 
     OrchestratorClient();
     ~OrchestratorClient();
@@ -142,7 +144,7 @@ public:
      * @brief EMERGENCY_STOP.
      *
      * Deliberately the one command with no loco address: it halts the layout,
-     * not a loco.
+     * not a loco. Every role may send it.
      */
     esp_err_t sendEmergencyStop();
 
@@ -200,6 +202,16 @@ public:
     void setSystemStatusCallback(SystemStatusCallback callback);
     void setRosterCallback(RosterCallback callback);
     void setTrackPowerCallback(TrackPowerCallback callback);
+
+    /**
+     * @brief Notified of every ERROR frame.
+     *
+     * The orchestrator answers a refused command -- one sent while the system
+     * is offline, say -- with an ERROR that names no command. The display may
+     * already show what was asked for, so the listener's job is to put back
+     * what the layout last reported (F-25).
+     */
+    void setCommandRefusedCallback(CommandRefusedCallback callback);
 
     /** Seconds since the last message of any kind. Large means a stale link. */
     uint32_t secondsSinceLastMessage() const;
@@ -279,7 +291,15 @@ private:
                                       int32_t eventId,
                                       void* eventData);
 
+    /**
+     * The WebSocket handle. Read by senders on the encoder and LVGL tasks, and
+     * stopped and destroyed by a re-login on the supervisor's -- so every use
+     * of it holds m_clientMutex, or a re-login frees it under a send (F-26).
+     * Nothing on the WebSocket's own task may take that mutex: disconnect()
+     * holds it while waiting for that task to stop.
+     */
     esp_websocket_client_handle_t m_client;
+    mutable SemaphoreHandle_t m_clientMutex;
     ConnectionState m_state;
 
     std::string m_host;
@@ -304,6 +324,7 @@ private:
     SystemStatusCallback m_systemStatusCallback;
     RosterCallback m_rosterCallback;
     TrackPowerCallback m_trackPowerCallback;
+    CommandRefusedCallback m_commandRefusedCallback;
 
     mutable SemaphoreHandle_t m_stateMutex;
 };

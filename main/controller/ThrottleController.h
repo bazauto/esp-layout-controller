@@ -92,6 +92,25 @@ public:
      * @param throttleId Throttle ID (0-3)
      */
     void onThrottleFunctions(int throttleId);
+
+    /**
+     * @brief A function button was pressed or released.
+     *
+     * What that means depends on the transport, so the UI reports the button
+     * and this decides. Press/release goes straight through where the
+     * transport applies latching itself (WiThrottle); where it stores the
+     * state it is sent (the orchestrator), a press toggles and a release does
+     * nothing (F-28).
+     */
+    void onFunctionButton(int throttleId, int functionNumber, bool pressed);
+
+    /**
+     * @brief Stop everything the transport can, at once (F-27).
+     *
+     * Every throttle shows speed 0 only once the stop has been sent: showing a
+     * stop that never left the device would be worse than showing nothing.
+     */
+    void emergencyStop();
     
 #if CONFIG_THROTTLE_TESTS
     /**
@@ -201,10 +220,21 @@ private:
     void unlockState() const;
 
     void updateUI();
-    void sendSpeedCommand(int throttleId, int speed);
-    void sendDirectionCommand(int throttleId, bool forward);
+    esp_err_t sendSpeedCommand(int throttleId, int speed);
     /** Used whenever both change at once — see ThrottleBackend for why. */
-    void sendSpeedAndDirectionCommand(int throttleId, int speed, bool forward);
+    esp_err_t sendSpeedAndDirectionCommand(int throttleId, int speed, bool forward);
+
+    /**
+     * @brief Undo an optimistic speed/direction change whose command failed.
+     *
+     * Only when the model still holds what we set: a transport report that
+     * landed in between is newer than either value and stays (F-25).
+     */
+    void rollBackOptimisticUpdate(int throttleId, int attemptedSpeed, bool attemptedForward,
+                                  int previousSpeed, bool previousForward);
+
+    /** Knob input is refused while the link is down; says so, at most once a second. */
+    bool knobInputAllowed(int knobId);
     std::unique_ptr<Locomotive> createLocomotiveFromRoster(const ThrottleBackend::RosterEntry& rosterEntry);
 
     // Backend callback handlers

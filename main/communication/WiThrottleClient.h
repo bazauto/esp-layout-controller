@@ -194,6 +194,14 @@ public:
      * @return ESP_OK on success
      */
     esp_err_t setFunction(char throttleId, int function, bool state);
+
+    /**
+     * @brief Emergency-stop every loco this client holds (`M<id>A<addr><;>X`).
+     *
+     * WiThrottle has no layout-wide stop, so this is the strongest one it has.
+     * @return ESP_OK when every held loco was sent the stop (or none is held).
+     */
+    esp_err_t emergencyStopAll();
     
     /**
      * @brief Query locomotive speed

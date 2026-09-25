@@ -72,6 +72,7 @@ private:
     // Event handlers
     static void onSettingsButtonClicked(lv_event_t* e);
     static void onJmriButtonClicked(lv_event_t* e);
+    static void onEmergencyStopPressed(lv_event_t* e);
     
     // LVGL UI components
     lv_obj_t* m_screen;

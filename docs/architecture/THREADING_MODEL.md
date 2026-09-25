@@ -101,16 +101,22 @@ sequenceDiagram
     activate TC
     Note over TC: xSemaphoreTake(m_stateMutex)
     TC->>TC: Update Throttle/Knob model
+    Note over TC: xSemaphoreGive(m_stateMutex)
     TC->>WT: setSpeed(throttleId, speed)
     TC->>UI: uiUpdateCallback()
+    deactivate TC
     Note over UI: lvgl_port_lock(200)
+    UI->>TC: getThrottleSnapshot() — takes m_stateMutex
     UI->>UI: updateAllThrottles()
     Note over UI: lvgl_port_unlock()
-    Note over TC: xSemaphoreGive(m_stateMutex)
-    deactivate TC
 ```
 
-**Lock ordering:** Always acquire `m_stateMutex` before `lvgl_port_lock` — never the reverse — to prevent deadlocks.
+**Lock ordering:** `lvgl_port_lock` before `m_stateMutex`, never the reverse. The UI takes the
+LVGL lock and then reads the controller — every LVGL event handler and every repaint does — so
+the controller releases its mutex before it sends or calls the UI (`updateUI()`, the
+track-power callback). A controller path that called the UI while holding its mutex would
+deadlock against any event handler. This was documented the other way round until F-29; the
+code has always done it this way.
 
 ---
 

@@ -124,6 +124,18 @@ public:
      */
     virtual bool requiresPolling() const = 0;
 
+    /**
+     * @brief Whether setFunction() reports a button, or sets a state.
+     *
+     * True for WiThrottle: the UI sends on at press and off at release, and
+     * JMRI applies each function's own latching setting. False for a transport
+     * that stores what it is sent as the function's new state -- the
+     * orchestrator does -- where press-on/release-off makes every function
+     * momentary. There the controller toggles on press and ignores the release
+     * (F-28).
+     */
+    virtual bool functionCommandIsButtonEvent() const = 0;
+
     // --- Connection --------------------------------------------------------
 
     virtual bool isConnected() const = 0;
@@ -172,6 +184,17 @@ public:
      * the throttle-state callback like any other update, not as a return value.
      */
     virtual esp_err_t refreshThrottleState(int throttleId) = 0;
+
+    /**
+     * @brief Stop everything this transport can, at once.
+     *
+     * Each transport answers in its own terms: the orchestrator's
+     * EMERGENCY_STOP halts the whole layout; WiThrottle has no layout-wide
+     * command, so it e-stops every loco this device has acquired. Either way
+     * it is the strongest stop available, which is what the button is for
+     * (F-27).
+     */
+    virtual esp_err_t emergencyStop() = 0;
 
     // --- Roster ------------------------------------------------------------
 

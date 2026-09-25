@@ -11,6 +11,13 @@ static const char* TAG = "OrchestratorClient";
 
 namespace {
 
+/** How long a sender waits for a re-login to finish with the socket handle.
+ * A send itself times out after 1 s, so this covers one in progress. */
+constexpr int CLIENT_LOCK_WAIT_MS = 1500;
+
+/** How long disconnect() waits for a send in progress to let go of the handle. */
+constexpr int CLIENT_LOCK_TEARDOWN_WAIT_MS = 5000;
+
 /** Login and roster reads are small; this caps a hostile or broken response. */
 constexpr int HTTP_RESPONSE_LIMIT = 8192;
 
@@ -120,6 +127,7 @@ bool wireToSystemStatus(const std::string& wire, OrchestratorClient::SystemStatu
 
 OrchestratorClient::OrchestratorClient()
     : m_client(nullptr)
+    , m_clientMutex(nullptr)
     , m_state(ConnectionState::DISCONNECTED)
     , m_port(DEFAULT_PORT)
     , m_systemStatus(SystemStatus::UNKNOWN)
@@ -136,6 +144,10 @@ OrchestratorClient::~OrchestratorClient()
         vSemaphoreDelete(m_stateMutex);
         m_stateMutex = nullptr;
     }
+    if (m_clientMutex) {
+        vSemaphoreDelete(m_clientMutex);
+        m_clientMutex = nullptr;
+    }
 }
 
 esp_err_t OrchestratorClient::initialize()
@@ -144,6 +156,13 @@ esp_err_t OrchestratorClient::initialize()
         m_stateMutex = xSemaphoreCreateMutex();
         if (!m_stateMutex) {
             ESP_LOGE(TAG, "Failed to create state mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!m_clientMutex) {
+        m_clientMutex = xSemaphoreCreateMutex();
+        if (!m_clientMutex) {
+            ESP_LOGE(TAG, "Failed to create socket handle mutex");
             return ESP_ERR_NO_MEM;
         }
     }
@@ -402,32 +421,54 @@ esp_err_t OrchestratorClient::openSocket(const std::string& host, uint16_t port)
     // across several events; m_rxBuffer reassembles it.
     cfg.buffer_size = 4096;
 
-    m_client = esp_websocket_client_init(&cfg);
-    if (!m_client) {
+    esp_websocket_client_handle_t client = esp_websocket_client_init(&cfg);
+    if (!client) {
         ESP_LOGE(TAG, "Failed to create WebSocket client");
         return ESP_FAIL;
     }
 
-    esp_websocket_register_events(m_client, WEBSOCKET_EVENT_ANY, websocketEventHandler, this);
+    esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, websocketEventHandler, this);
 
     ESP_LOGI(TAG, "Opening control plane at %s", m_uri.c_str());
-    esp_err_t err = esp_websocket_client_start(m_client);
+    esp_err_t err = esp_websocket_client_start(client);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start WebSocket client: %s", esp_err_to_name(err));
-        esp_websocket_client_destroy(m_client);
-        m_client = nullptr;
+        esp_websocket_client_destroy(client);
         return err;
+    }
+
+    // Published only once it is running, and under the handle mutex (F-26).
+    if (m_clientMutex) {
+        xSemaphoreTake(m_clientMutex, portMAX_DELAY);
+    }
+    m_client = client;
+    if (m_clientMutex) {
+        xSemaphoreGive(m_clientMutex);
     }
     return ESP_OK;
 }
 
 void OrchestratorClient::disconnect()
 {
-    if (m_client) {
+    // Held across stop and destroy, so no sender can be inside the handle
+    // while it is freed (F-26). Bounded: a sender holds it for at most one
+    // send, which times out after a second.
+    const bool haveClientLock =
+        m_clientMutex &&
+        xSemaphoreTake(m_clientMutex, pdMS_TO_TICKS(CLIENT_LOCK_TEARDOWN_WAIT_MS)) == pdTRUE;
+    if (m_clientMutex && !haveClientLock) {
+        ESP_LOGE(TAG, "Socket handle still in use after %d ms; tearing down anyway",
+                 CLIENT_LOCK_TEARDOWN_WAIT_MS);
+    }
+    esp_websocket_client_handle_t client = m_client;
+    m_client = nullptr;
+    if (client) {
         ESP_LOGI(TAG, "Disconnecting from orchestrator");
-        esp_websocket_client_stop(m_client);
-        esp_websocket_client_destroy(m_client);
-        m_client = nullptr;
+        esp_websocket_client_stop(client);
+        esp_websocket_client_destroy(client);
+    }
+    if (haveClientLock) {
+        xSemaphoreGive(m_clientMutex);
     }
 
     if (lockState(pdMS_TO_TICKS(200))) {
@@ -560,6 +601,15 @@ void OrchestratorClient::handleMessage(const std::string& json)
             ESP_LOGE(TAG, "Orchestrator refused a command: %s", message.c_str());
         } else {
             ESP_LOGE(TAG, "Orchestrator reported an error with no message");
+        }
+
+        CommandRefusedCallback callback;
+        if (lockState(pdMS_TO_TICKS(50))) {
+            callback = m_commandRefusedCallback;
+            unlockState();
+        }
+        if (callback) {
+            callback(message);
         }
     } else {
         // Blocks, points, routes, sensors and faults are all real messages this
@@ -938,13 +988,28 @@ void OrchestratorClient::testHandleMessage(const std::string& json)
 
 esp_err_t OrchestratorClient::sendJson(const std::string& json)
 {
-    if (!m_client || !isConnected()) {
+    // Checked first, without the handle mutex: while a re-login is under way
+    // the link is down, so senders leave here rather than queue behind it.
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to the orchestrator");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!m_clientMutex ||
+        xSemaphoreTake(m_clientMutex, pdMS_TO_TICKS(CLIENT_LOCK_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Socket handle busy; frame not sent");
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_websocket_client_handle_t client = m_client;
+    if (!client) {
+        xSemaphoreGive(m_clientMutex);
         ESP_LOGW(TAG, "Not connected to the orchestrator");
         return ESP_ERR_INVALID_STATE;
     }
 
     const int sent = esp_websocket_client_send_text(
-        m_client, json.c_str(), static_cast<int>(json.size()), pdMS_TO_TICKS(1000));
+        client, json.c_str(), static_cast<int>(json.size()), pdMS_TO_TICKS(1000));
+    xSemaphoreGive(m_clientMutex);
 
     if (sent < 0) {
         ESP_LOGE(TAG, "Failed to send frame");
@@ -1023,8 +1088,8 @@ esp_err_t OrchestratorClient::sendFunctionCommand(int locoAddress, int function,
 
 esp_err_t OrchestratorClient::sendEmergencyStop()
 {
-    // No payload by contract. Sent even when the link looks unhealthy -- the
-    // one command where trying and failing beats not trying.
+    // No payload by contract. With the socket down there is nothing to send
+    // it on; the caller reports that, and must not show the layout as stopped.
     ESP_LOGW(TAG, "Sending EMERGENCY_STOP");
     return sendJson("{\"type\":\"EMERGENCY_STOP\"}");
 }
@@ -1263,6 +1328,14 @@ void OrchestratorClient::setRosterCallback(RosterCallback callback)
 {
     if (lockState(pdMS_TO_TICKS(100))) {
         m_rosterCallback = std::move(callback);
+        unlockState();
+    }
+}
+
+void OrchestratorClient::setCommandRefusedCallback(CommandRefusedCallback callback)
+{
+    if (lockState(pdMS_TO_TICKS(100))) {
+        m_commandRefusedCallback = std::move(callback);
         unlockState();
     }
 }

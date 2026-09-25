@@ -42,6 +42,15 @@ esp_err_t WiThrottleBackend::setTrackPower(bool on)
     if (!m_jsonClient) {
         return ESP_ERR_NOT_SUPPORTED;
     }
+
+    // An OFF must not depend on the JSON link. When that link is down it goes
+    // over WiThrottle's own PPA0 instead -- all power rather than the named
+    // district, which is the safe direction to widen. ON still waits for the
+    // JSON link, so it keeps meaning the configured district only (F-27).
+    if (!on && !m_jsonClient->isConnected() && m_client && m_client->isConnected()) {
+        ESP_LOGW(TAG, "JMRI JSON link down; sending track power OFF over WiThrottle (PPA0)");
+        return m_client->setTrackPower("main", false);
+    }
     return m_jsonClient->setPower(on);
 }
 
@@ -54,8 +63,19 @@ ThrottleBackend::TrackPower WiThrottleBackend::getTrackPower() const
     switch (m_jsonClient->getPower()) {
         case JmriJsonClient::PowerState::ON:  return TrackPower::ON;
         case JmriJsonClient::PowerState::OFF: return TrackPower::OFF;
-        default:                              return TrackPower::UNKNOWN;
+        default:                              break;
     }
+
+    // Nothing from the JSON link: fall back to what WiThrottle's PPA lines
+    // last said, rather than showing unknown while JMRI has told us.
+    if (m_client) {
+        switch (m_client->getTrackPower("main")) {
+            case WiThrottleClient::PowerState::ON:  return TrackPower::ON;
+            case WiThrottleClient::PowerState::OFF: return TrackPower::OFF;
+            default:                                break;
+        }
+    }
+    return TrackPower::UNKNOWN;
 }
 
 void WiThrottleBackend::setTrackPowerCallback(TrackPowerCallback callback)
@@ -156,6 +176,14 @@ esp_err_t WiThrottleBackend::refreshThrottleState(int throttleId)
     esp_err_t speedErr = m_client->querySpeed(wireId);
     esp_err_t dirErr = m_client->queryDirection(wireId);
     return (speedErr != ESP_OK) ? speedErr : dirErr;
+}
+
+esp_err_t WiThrottleBackend::emergencyStop()
+{
+    if (!m_client) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return m_client->emergencyStopAll();
 }
 
 size_t WiThrottleBackend::getRosterSize() const

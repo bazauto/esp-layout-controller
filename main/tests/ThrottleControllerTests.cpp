@@ -34,7 +34,13 @@ namespace {
         bool rosterProvided = true;
         bool labelsProvided = true;
         bool pollingRequired = true;
+        bool functionButtonEvents = true;
         bool connected = true;
+
+        // What the commands report back, so a test can make one fail.
+        esp_err_t speedResult = ESP_OK;
+        esp_err_t emergencyResult = ESP_OK;
+        int emergencyStops = 0;
         std::vector<RosterEntry> roster;
 
         std::vector<Call> acquires;
@@ -49,6 +55,7 @@ namespace {
         bool providesRoster() const override { return rosterProvided; }
         bool providesFunctionLabels() const override { return labelsProvided; }
         bool requiresPolling() const override { return pollingRequired; }
+        bool functionCommandIsButtonEvent() const override { return functionButtonEvents; }
 
         bool isConnected() const override { return connected; }
         ConnectionState getState() const override {
@@ -65,7 +72,7 @@ namespace {
         }
         esp_err_t setSpeed(int throttleId, int speed) override {
             speeds.push_back({throttleId, speed, false});
-            return ESP_OK;
+            return speedResult;
         }
         esp_err_t setDirection(int throttleId, bool forward) override {
             directions.push_back({throttleId, 0, forward});
@@ -75,7 +82,7 @@ namespace {
         // ones; the port's default would show up as a direction then a speed.
         esp_err_t setSpeedAndDirection(int throttleId, int speed, bool forward) override {
             pairedCommands.push_back({throttleId, speed, forward});
-            return ESP_OK;
+            return speedResult;
         }
         esp_err_t setFunction(int throttleId, int function, bool state) override {
             functions.push_back({throttleId, function, state});
@@ -84,6 +91,10 @@ namespace {
         esp_err_t refreshThrottleState(int throttleId) override {
             refreshes.push_back({throttleId, 0, false});
             return ESP_OK;
+        }
+        esp_err_t emergencyStop() override {
+            emergencyStops++;
+            return emergencyResult;
         }
 
         size_t getRosterSize() const override { return roster.size(); }
@@ -580,6 +591,114 @@ static void test_controller_extreme_delta_is_well_defined(void)
     TEST_ASSERT_EQUAL_INT(1, (int)(backend.speeds.size() + backend.pairedCommands.size()));
 }
 
+static void test_controller_knob_ignored_while_disconnected(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+
+    setupThrottleWithLoco(controller, 0, 0, "LocoL", 12);
+    Throttle* throttle = controller.getThrottle(0);
+    TEST_ASSERT_NOT_NULL(throttle);
+    throttle->setSpeed(20);
+
+    // The physical encoders reach the controller directly, so the gate has to
+    // be here, not only on the touch pips (F-25).
+    backend.connected = false;
+    controller.onKnobRotation(0, 3);
+    controller.onKnobPress(0);
+
+    TEST_ASSERT_EQUAL_INT(20, throttle->getCurrentSpeed());
+    TEST_ASSERT_EQUAL_INT(0, (int)(backend.speeds.size() + backend.pairedCommands.size()));
+}
+
+static void test_controller_failed_send_rolls_back(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+
+    setupThrottleWithLoco(controller, 0, 0, "LocoM", 13);
+    Throttle* throttle = controller.getThrottle(0);
+    TEST_ASSERT_NOT_NULL(throttle);
+    throttle->setSpeed(20);
+    throttle->setDirection(true);
+
+    // A refused command must not leave the display ahead of the loco: the
+    // next click would be computed from a speed it never had (F-25).
+    backend.speedResult = ESP_FAIL;
+    controller.onKnobRotation(0, 2);
+    TEST_ASSERT_EQUAL_INT(20, throttle->getCurrentSpeed());
+    TEST_ASSERT_TRUE(throttle->getDirection());
+
+    // Nor a stop that never left the device.
+    controller.onKnobPress(0);
+    TEST_ASSERT_EQUAL_INT(20, throttle->getCurrentSpeed());
+}
+
+static void test_controller_function_press_release_for_event_backend(void)
+{
+    FakeThrottleBackend backend;
+    backend.functionButtonEvents = true;
+    ThrottleController controller(&backend);
+    setupThrottleWithLoco(controller, 0, 0, "LocoN", 14);
+
+    // WiThrottle: press and release go through; JMRI applies latching.
+    controller.onFunctionButton(0, 2, true);
+    controller.onFunctionButton(0, 2, false);
+
+    TEST_ASSERT_EQUAL_INT(2, (int)backend.functions.size());
+    TEST_ASSERT_TRUE(backend.functions[0].boolArg);
+    TEST_ASSERT_FALSE(backend.functions[1].boolArg);
+}
+
+static void test_controller_function_toggles_for_state_backend(void)
+{
+    FakeThrottleBackend backend;
+    backend.functionButtonEvents = false;
+    ThrottleController controller(&backend);
+    setupThrottleWithLoco(controller, 0, 0, "LocoO", 15);
+
+    // The orchestrator stores what it is sent: a press toggles, a release is
+    // nothing. Press-on/release-off made every function momentary (F-28).
+    controller.onFunctionButton(0, 0, true);
+    controller.onFunctionButton(0, 0, false);
+    TEST_ASSERT_EQUAL_INT(1, (int)backend.functions.size());
+    TEST_ASSERT_TRUE(backend.functions[0].boolArg);
+
+    // Once the layout reports it on, the next press turns it off.
+    ThrottleBackend::ThrottleUpdate update;
+    update.throttleId = 0;
+    update.address = 15;
+    update.function = 0;
+    update.functionState = true;
+    backend.emitThrottleUpdate(update);
+
+    controller.onFunctionButton(0, 0, true);
+    TEST_ASSERT_EQUAL_INT(2, (int)backend.functions.size());
+    TEST_ASSERT_FALSE(backend.functions[1].boolArg);
+}
+
+static void test_controller_emergency_stop(void)
+{
+    FakeThrottleBackend backend;
+    ThrottleController controller(&backend);
+    setupThrottleWithLoco(controller, 0, 0, "LocoP", 16);
+    Throttle* throttle = controller.getThrottle(0);
+    TEST_ASSERT_NOT_NULL(throttle);
+
+    // Not sent: the display must not claim a stop (F-27).
+    throttle->setSpeed(50);
+    backend.emergencyResult = ESP_FAIL;
+    controller.emergencyStop();
+    TEST_ASSERT_EQUAL_INT(1, backend.emergencyStops);
+    TEST_ASSERT_EQUAL_INT(50, throttle->getCurrentSpeed());
+
+    // Sent: every allocated throttle shows stopped.
+    backend.emergencyResult = ESP_OK;
+    controller.emergencyStop();
+    TEST_ASSERT_EQUAL_INT(2, backend.emergencyStops);
+    TEST_ASSERT_EQUAL_INT(0, throttle->getCurrentSpeed());
+}
+
 extern "C" void register_controller_tests(void)
 {
     RUN_TEST(test_controller_assign_knob_to_unallocated);
@@ -603,4 +722,9 @@ extern "C" void register_controller_tests(void)
     RUN_TEST(test_controller_hides_track_power_when_unsupported);
     RUN_TEST(test_encoder_implausible_delta_is_refused);
     RUN_TEST(test_controller_extreme_delta_is_well_defined);
+    RUN_TEST(test_controller_knob_ignored_while_disconnected);
+    RUN_TEST(test_controller_failed_send_rolls_back);
+    RUN_TEST(test_controller_function_press_release_for_event_backend);
+    RUN_TEST(test_controller_function_toggles_for_state_backend);
+    RUN_TEST(test_controller_emergency_stop);
 }

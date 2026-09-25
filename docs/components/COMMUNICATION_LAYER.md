@@ -26,7 +26,25 @@ and that difference surfaces here rather than as a fake session.
 | `providesRoster()` | No selectable roster — the controller must not offer loco selection |
 | `providesFunctionLabels()` | UI falls back to `F0`…`F28` |
 | `requiresPolling()` | State arrives unprompted; no `throttle_poll` task is created |
+| `functionCommandIsButtonEvent()` | `setFunction()` sets a state outright (orchestrator), so the controller toggles on press and ignores the release (F-28). True for WiThrottle, where JMRI applies latching to press and release |
 | `supportsTrackPower()` | The power button is **hidden**, not left dead |
+
+### Emergency stop
+
+`emergencyStop()` stops everything the transport can, each in its own terms (F-27): the
+orchestrator's `EMERGENCY_STOP` halts the **whole layout**; WiThrottle has no layout-wide
+command, so it sends `X` to every loco this device holds. The controller shows the throttles
+as stopped only once the stop has actually been sent.
+
+### Refused commands (orchestrator)
+
+The orchestrator answers a refused command — one sent while the system is `offline`, say —
+with an `ERROR` that names no command. By then the controller has already shown what was asked
+for, so `OrchestratorBackend` re-seeds every assigned throttle from the layout's last reported
+state (F-25). The send itself succeeded, so rolling back on a failed send cannot catch this.
+
+`OrchestratorClient::m_client` is guarded by its own mutex, held across each send and across a
+re-login's stop and destroy, so a re-login cannot free the handle under a sender (F-26).
 
 ### Track power lives on this port too
 

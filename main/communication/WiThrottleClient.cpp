@@ -482,6 +482,42 @@ esp_err_t WiThrottleClient::setFunction(char throttleId, int function, bool stat
     return sendCommand(command);
 }
 
+esp_err_t WiThrottleClient::emergencyStopAll()
+{
+    if (!isConnected()) {
+        ESP_LOGW(TAG, "Not connected to server; emergency stop not sent");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    std::vector<std::pair<char, ThrottleState>> held;
+    if (!lockState(pdMS_TO_TICKS(100))) {
+        ESP_LOGE(TAG, "Failed to lock state for emergency stop");
+        return ESP_ERR_TIMEOUT;
+    }
+    for (const auto& entry : m_throttleStates) {
+        if (entry.second.acquired) {
+            held.emplace_back(entry.first, entry.second);
+        }
+    }
+    unlockState();
+
+    // Every loco is tried even if one fails: a stop that reaches three of four
+    // locos is better than one that gives up at the first.
+    esp_err_t result = ESP_OK;
+    for (const auto& entry : held) {
+        const std::string command = "M" + std::string(1, entry.first) + "A" +
+                                    std::string(1, entry.second.addressType) +
+                                    std::to_string(entry.second.address) + "<;>X";
+        ESP_LOGW(TAG, "EMERGENCY STOP throttle %c (loco %c%d)", entry.first,
+                 entry.second.addressType, entry.second.address);
+        const esp_err_t err = sendCommand(command);
+        if (err != ESP_OK && result == ESP_OK) {
+            result = err;
+        }
+    }
+    return result;
+}
+
 esp_err_t WiThrottleClient::querySpeed(char throttleId)
 {
     if (!isConnected()) {
