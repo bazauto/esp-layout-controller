@@ -33,7 +33,7 @@ freeze while one is moving.
 | F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Code done | #29 |
 | F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Code done | #30 |
 | F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Code done | #31 |
-| F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Code done | #32 |
+| F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Code done (docs only; no bench check) | #32 |
 | F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Slots: code done; sync: open | #33 |
 | F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Code done | #34 |
 | F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done | #35 |
@@ -384,8 +384,8 @@ bounded at 1 s), and make the connecting check atomic.
 
 **Progress:** Batch 3 made the `orch_connect` supervisor the only caller of `connect()` — the
 config screen now wakes it rather than connecting on a task of its own — so two connects can
-no longer race. A re-login still destroys the handle under a concurrent sender; that half
-remains.
+no longer race. Batch 4 added the handle mutex, so a re-login can no longer free the handle
+under a sender.
 
 **Files:** `OrchestratorClient.h/.cpp`
 
