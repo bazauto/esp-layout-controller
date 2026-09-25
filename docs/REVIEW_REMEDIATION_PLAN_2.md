@@ -10,6 +10,9 @@ on the board.
 IDs continue from the first pass (`docs/REVIEW_REMEDIATION_PLAN.md`, F-01…F-18), so an `F-nn`
 reference in a code comment is unambiguous across both documents.
 
+Each finding also has a GitHub issue — `F-nn` is `bazauto/esp-layout-controller#(nn+3)`, #22 to
+#47 — as a permanent record outside the tree. This document stays the place its status is kept.
+
 Severity is weighed the way CLAUDE.md asks: by whether a train moves when nobody commanded it,
 whether the operator can lose the ability to stop one, or whether the device can crash or
 freeze while one is moving.
@@ -18,34 +21,34 @@ freeze while one is moving.
 
 ## Progress Tracker
 
-| ID | Finding | Severity | Effort | Batch | Status |
-|----|---------|----------|--------|-------|--------|
-| F-19 | [Unbounded encoder delta](#f-19-unbounded-encoder-delta) | HIGH | Small | 1 | Code done |
-| F-20 | [Orchestrator acquire starts from speed 0](#f-20-orchestrator-acquire-starts-from-speed-0) | HIGH | Medium | 1 | Code done |
-| F-21 | [Use-after-free on return to the main screen](#f-21-use-after-free-on-return-to-the-main-screen) | HIGH | Medium | 1 | Code done |
-| F-22 | [WiThrottle reconnect leaks a socket and loses the session](#f-22-withrottle-reconnect-leaks-a-socket-and-loses-the-session) | HIGH | Medium | 2 | Code done |
-| F-23 | [WiThrottle heartbeat never armed](#f-23-withrottle-heartbeat-never-armed) | HIGH | Small | 2 | Code done |
-| F-24 | [No automatic recovery after an ordinary outage](#f-24-no-automatic-recovery-after-an-ordinary-outage) | HIGH | Medium | 3 | Code done |
-| F-25 | [Physical knobs not gated; optimistic update outlives a failed send](#f-25-physical-knobs-not-gated-optimistic-update-outlives-a-failed-send) | MEDIUM | Small | 4 | Open |
-| F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Concurrent connect removed (batch 3); handle lock: open |
-| F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Open |
-| F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Open |
-| F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Open |
-| F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Slots: code done; sync: open |
-| F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Code done |
-| F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done |
-| F-33 | [Task stack headroom unmeasured](#f-33-task-stack-headroom-unmeasured) | MEDIUM | Small | 5 | Open |
-| F-34 | [JMRI config screen connect/disconnect faults](#f-34-jmri-config-screen-connectdisconnect-faults) | MEDIUM | Medium | 3 | Code done |
-| F-35 | [Orchestrator roster refused above ~35 locos](#f-35-orchestrator-roster-refused-above-35-locos) | MEDIUM | Small | 5 | Open |
-| F-36 | [Operator credential and session cookie in cleartext](#f-36-operator-credential-and-session-cookie-in-cleartext) | MEDIUM | Small (decision) | 5 | Open |
-| F-37 | [WiThrottle updates unvalidated](#f-37-withrottle-updates-unvalidated) | LOW | Small | 5 | Open |
-| F-38 | [Hot-path logging and repaint cost](#f-38-hot-path-logging-and-repaint-cost) | LOW | Small | 5 | Open |
-| F-39 | [NVS writes on the LVGL task](#f-39-nvs-writes-on-the-lvgl-task) | LOW | Small | 5 | JMRI settings: done (batch 3); rest: open |
-| F-40 | [WiFi credential save and reboot-on-error](#f-40-wifi-credential-save-and-reboot-on-error) | LOW | Small | 3 | Code done |
-| F-41 | [Seesaw read timing](#f-41-seesaw-read-timing) | LOW | Small | 5 | Open |
-| F-42 | [Protocol hygiene odds and ends](#f-42-protocol-hygiene-odds-and-ends) | LOW | Small | 5 | Open |
-| F-43 | [CI hardening](#f-43-ci-hardening) | LOW | Small | 5 | Open |
-| F-44 | [Threading-model task table drift](#f-44-threading-model-task-table-drift) | LOW | Small | 5 | Open |
+| ID | Finding | Severity | Effort | Batch | Status | Issue |
+|----|---------|----------|--------|-------|--------|-------|
+| F-19 | [Unbounded encoder delta](#f-19-unbounded-encoder-delta) | HIGH | Small | 1 | Code done | #22 |
+| F-20 | [Orchestrator acquire starts from speed 0](#f-20-orchestrator-acquire-starts-from-speed-0) | HIGH | Medium | 1 | Code done | #23 |
+| F-21 | [Use-after-free on return to the main screen](#f-21-use-after-free-on-return-to-the-main-screen) | HIGH | Medium | 1 | Code done | #24 |
+| F-22 | [WiThrottle reconnect leaks a socket and loses the session](#f-22-withrottle-reconnect-leaks-a-socket-and-loses-the-session) | HIGH | Medium | 2 | Code done | #25 |
+| F-23 | [WiThrottle heartbeat never armed](#f-23-withrottle-heartbeat-never-armed) | HIGH | Small | 2 | Code done | #26 |
+| F-24 | [No automatic recovery after an ordinary outage](#f-24-no-automatic-recovery-after-an-ordinary-outage) | HIGH | Medium | 3 | Code done | #27 |
+| F-25 | [Physical knobs not gated; optimistic update outlives a failed send](#f-25-physical-knobs-not-gated-optimistic-update-outlives-a-failed-send) | MEDIUM | Small | 4 | Open | #28 |
+| F-26 | [`OrchestratorClient::m_client` destroyed under a sender](#f-26-orchestratorclientm_client-destroyed-under-a-sender) | MEDIUM | Medium | 4 | Concurrent connect removed (batch 3); handle lock: open | #29 |
+| F-27 | [No emergency stop; power button fails the wrong way](#f-27-no-emergency-stop-power-button-fails-the-wrong-way) | MEDIUM | Medium | 4 | Open | #30 |
+| F-28 | [Every function is momentary under the orchestrator](#f-28-every-function-is-momentary-under-the-orchestrator) | MEDIUM | Small | 4 | Open | #31 |
+| F-29 | [Documented lock order is the reverse of the code's](#f-29-documented-lock-order-is-the-reverse-of-the-codes) | MEDIUM | Small | 4 | Open | #32 |
+| F-30 | [Callback slots unsynchronised and clobbered](#f-30-callback-slots-unsynchronised-and-clobbered) | MEDIUM | Medium | 1 (part), 5 | Slots: code done; sync: open | #33 |
+| F-31 | [JMRI heartbeat task deleted from outside](#f-31-jmri-heartbeat-task-deleted-from-outside) | MEDIUM | Small | 2 | Code done | #34 |
+| F-32 | [Main screen LVGL tree leaks on every return](#f-32-main-screen-lvgl-tree-leaks-on-every-return) | MEDIUM | Small | 1 | Code done | #35 |
+| F-33 | [Task stack headroom unmeasured](#f-33-task-stack-headroom-unmeasured) | MEDIUM | Small | 5 | Open | #36 |
+| F-34 | [JMRI config screen connect/disconnect faults](#f-34-jmri-config-screen-connectdisconnect-faults) | MEDIUM | Medium | 3 | Code done | #37 |
+| F-35 | [Orchestrator roster refused above ~35 locos](#f-35-orchestrator-roster-refused-above-35-locos) | MEDIUM | Small | 5 | Open | #38 |
+| F-36 | [Operator credential and session cookie in cleartext](#f-36-operator-credential-and-session-cookie-in-cleartext) | MEDIUM | Small (decision) | 5 | Open | #39 |
+| F-37 | [WiThrottle updates unvalidated](#f-37-withrottle-updates-unvalidated) | LOW | Small | 5 | Open | #40 |
+| F-38 | [Hot-path logging and repaint cost](#f-38-hot-path-logging-and-repaint-cost) | LOW | Small | 5 | Open | #41 |
+| F-39 | [NVS writes on the LVGL task](#f-39-nvs-writes-on-the-lvgl-task) | LOW | Small | 5 | JMRI settings: done (batch 3); rest: open | #42 |
+| F-40 | [WiFi credential save and reboot-on-error](#f-40-wifi-credential-save-and-reboot-on-error) | LOW | Small | 3 | Code done | #43 |
+| F-41 | [Seesaw read timing](#f-41-seesaw-read-timing) | LOW | Small | 5 | Open | #44 |
+| F-42 | [Protocol hygiene odds and ends](#f-42-protocol-hygiene-odds-and-ends) | LOW | Small | 5 | Open | #45 |
+| F-43 | [CI hardening](#f-43-ci-hardening) | LOW | Small | 5 | Open | #46 |
+| F-44 | [Threading-model task table drift](#f-44-threading-model-task-table-drift) | LOW | Small | 5 | Open | #47 |
 
 **Status key:** *Open* — not started. *Code done* — implemented and compiled, bench criteria
 still unticked. *Done* — bench criteria confirmed on the board.
@@ -231,8 +234,10 @@ whatever the command station last refreshed.
 2. On a fresh session, re-acquire every loco that was acquired on the old one (the client
    already records address and type per throttle). JMRI then restates speed and direction,
    which re-seeds the display.
-3. Keep `m_throttleStates` consistent with what the server actually has: cleared on an explicit
-   `disconnect()`, replayed on reconnect.
+3. Keep `m_throttleStates` consistent with what the UI shows as allocated, not with the TCP
+   session: it survives any disconnect, explicit or not, and is replayed on every new
+   session. Only a release removes an entry — even while disconnected, so a loco the operator
+   let go is not re-acquired.
 
 **Files:** `WiThrottleClient.h/.cpp`, possibly `JmriConnectionController.cpp`
 
@@ -265,8 +270,9 @@ off. The device also sends `HESP32-S3`, where the protocol expects `HU<unique-id
 #### Plan
 
 1. Send `HU<MAC>` (a stable per-device id) and `N<name>` on connect.
-2. Parse the server's `*<seconds>` announcement; if non-zero, send `*+` and run a heartbeat
-   from a small dedicated task at half that interval. Stop it before the socket closes.
+2. Parse the server's `*<seconds>` announcement; if non-zero, send `*+` and then `*` at half
+   that interval. Sent from the receive task, which wakes at least once a second anyway, so
+   the heartbeat needs no task of its own and ends with the session.
 
 **Files:** `WiThrottleClient.h/.cpp`
 
@@ -303,8 +309,8 @@ In each case the operator has no control until they fix it by hand in settings.
 2. Orchestrator: a supervising task that retries login and socket with backoff until
    connected, and re-logs in (rather than relying on the WebSocket's cookie-reusing
    auto-reconnect) when the socket stays down.
-3. JMRI: the auto-connect task waits for WiFi indefinitely and always leaves auto-reconnect
-   enabled once settings exist.
+3. JMRI: wait for WiFi indefinitely and keep reconnecting once settings exist — done by the
+   single `jmri_conn` task F-34 introduces.
 
 **Files:** `WiFiManager.h/.cpp`, `AppController.h/.cpp`, `JmriConnectionController.cpp`
 
@@ -690,5 +696,6 @@ No `permissions:` block, actions pinned by tag rather than SHA, and
 
 **Severity:** LOW | **Effort:** Small | **Batch:** 5
 
-`THREADING_MODEL.md`'s table is missing `jmri_connect` (6 KB) and `wifi_scan` (4 KB), and will
-need the measured figures from F-33.
+`THREADING_MODEL.md`'s table is missing `wifi_scan` (4 KB), and will need the measured figures
+from F-33. (It was also missing `jmri_connect`; batch 3 removed that task, folding it into
+`jmri_conn`, which the table now lists.)
